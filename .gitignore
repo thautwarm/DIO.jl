@@ -6,3 +6,11 @@
 /dev/
 /docs/build/
 /docs/site/
+**__pycache__/
+dev_test/
+Digraph.gv*
+.idea/
+.spyproject/
+**.egg-info/
+dist/
+**~
