@@ -1,8 +1,13 @@
+__precompile__(true)
 module RestrainJIT
 using PyCall
 using MLStyle
 import GeneralizedGenerated: Typeable, to_type, from_type, to_typelist, RuntimeFn, Argument, Unset, TNil
+import DataStructures: list
 using CanonicalTraits: @trait, @implement
+
+
+@implement Typeable{Ptr{T}} where T
 
 @use UppercaseCapturing
 
@@ -123,9 +128,6 @@ str_yield_sym(s::String) = Symbol(s)
     i_Const = repr_m."Const"
     i_Reg = repr_m."Reg"
 
-    ⬱(a::PyObject, b::PyObject) = pycall(pyisa, PyObject, a, b) == py_true
-
-
     function jit_impl(func_info:: PyObject)
 
         if !pyisa(func_info, PyFuncInfo)
@@ -136,7 +138,7 @@ str_yield_sym(s::String) = Symbol(s)
 
 
         function to_jl_const(py::PyObject) :: Const
-            if py ⬱ PyCodeInfo
+            if (pyisa <| [py, PyCodeInfo]) == py_true
                 return Const(to_jl_fptr(py))
             end
             Const(PyAny(py."val"))
@@ -203,7 +205,7 @@ str_yield_sym(s::String) = Symbol(s)
         end
 
         function to_jl_instr(::Val{:UnwindBlock}, instr::PyObject)
-            UnwindBlock(A[to_jl_instrs(i) for i in instr."instrs"])
+            UnwindBlock(to_jl_instrs(instr."instrs"))
         end
 
         function to_jl_instr(::Val{:PopException}, instr::PyObject)
@@ -242,7 +244,7 @@ str_yield_sym(s::String) = Symbol(s)
             cellvars = Symbol[Symbol(a) for a in py."cellvars"]
             freevars = Symbol[Symbol(a) for a in py."freevars"]
             suite = map(code_gen, jl_instrs)
-            type_stable_shared_bounds = get(operator, "type_stable_shared_bounds")
+            type_stable_shared_bounds = get(r_options, "type_stable_shared_bounds") do
                 true
             end
             MKBoundCell = type_stable_shared_bounds ? Ref : Cell
@@ -252,7 +254,7 @@ str_yield_sym(s::String) = Symbol(s)
             end
             predef = Expr[mk_cell_var(e) for e in cellvars]
             push!(predef, :(__object_stack__ = ()))
-            if any(x -> x isa UnwindBlock, instrs)
+            if any(x -> x isa UnwindBlock, jl_instrs)
                 push!(predef, :(__exception_stack__ = ()))
             end
             body = Expr(:block, line, predef..., suite...)
@@ -265,7 +267,7 @@ str_yield_sym(s::String) = Symbol(s)
             # args
             append!(allargs, Argument[Argument(arg, nothing, Unset()) for arg in argnames])
 
-            Args = to_type(allargs)
+            Args = to_type(list(allargs...))
             RuntimeFn{Args, TNil{Argument}, Body}()
         end
 
@@ -285,7 +287,7 @@ str_yield_sym(s::String) = Symbol(s)
 
         @info :ok
         if is_aggresive
-
+            glob_vals = Dict{Symbol, Any}()
             for k in glob_deps
 
                 o = r_globals."get" <| [k]
@@ -295,7 +297,7 @@ str_yield_sym(s::String) = Symbol(s)
                 k = Symbol(k)
 
                 glob_vals[k] = if PyAny(py_hasattr <| (o, "__jit__"))
-                    PyAny(o."jit")
+                    PyAny(o."__jit__")
                 else
                     PyAny(o)
                 end
@@ -307,6 +309,7 @@ str_yield_sym(s::String) = Symbol(s)
 
         @info :redy glob_vals
         fp = to_jl_fptr(func_info."r_codeinfo")
+        @info :done
         pycall(bridge_push!, PyObject, fp)
     end
 
@@ -315,7 +318,6 @@ str_yield_sym(s::String) = Symbol(s)
         try
             jit_impl(py)
         catch e
-            print(stacktrace())
             pyraise(e)
         end
         0
@@ -394,7 +396,7 @@ function code_gen(instr::Instr)
                 )
             end
         Label(label) => :(@label $label)
-        Peek($n) => :($peek($Val($n), __object_stack__))
+        Peek(n) => :($peek($Val($n), __object_stack__))
         Return(val) =>
             let val = _repr_to_expr(val)
                 :(return $val)
@@ -423,7 +425,7 @@ function code_gen(instr::Instr)
             end
         PopException(false) =>
                 :(
-                    if isempty(__exception_stack__)
+                    if $isempty(__exception_stack__)
                         nothing
                     else
                         let e = __exception_stack__[1]
@@ -431,7 +433,7 @@ function code_gen(instr::Instr)
                             e
                         end
                     end
-                :)
+                )
         PopException(true) =>
             :(
                 let e = __exception_stack__[1]
@@ -443,5 +445,3 @@ function code_gen(instr::Instr)
 end
 
 end # module
-
-
