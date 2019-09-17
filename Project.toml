@@ -4,6 +4,7 @@ authors = ["thautwarm"]
 version = "0.1.0"
 
 [deps]
+CanonicalTraits = "a603d957-0e48-4f86-8fbd-0b7bc66df689"
 GeneralizedGenerated = "6b9d7cbe-bcb9-11e9-073f-15a7a543e2eb"
 MLStyle = "d8e11817-5142-5d16-987a-aa16d5891078"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
