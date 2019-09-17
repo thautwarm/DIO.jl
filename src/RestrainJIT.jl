@@ -1,7 +1,7 @@
 module RestrainJIT
 using PyCall
 using MLStyle
-import GeneralizedGenerated: Typeable, to_type, from_type, to_typelist
+import GeneralizedGenerated: Typeable, to_type, from_type, to_typelist, RuntimeFn, Argument, Unset, TNil
 using CanonicalTraits: @trait, @implement
 
 @use UppercaseCapturing
@@ -24,6 +24,7 @@ Vec = Vector
 abstract type AbsA end
 
 @data Instr begin
+    Value(v::Any)
     App(f:: Repr, args:: Vec{Repr})
     Ass(reg::Reg, val::Repr)
     Load(reg::Reg)
@@ -36,7 +37,7 @@ abstract type AbsA end
     Return(val::Repr)
     Push(val::Repr)
     Pop();
-    PyGlob(qual::Union{Nothing, Symbol}, name::Symbol)
+    PyGlob(qual::Ptr{PyCall.PyObject_struct}, name::String)
     JlGlob(qual::Union{Nothing, Symbol}, name::Symbol)
     UnwindBlock(instrs::Vec{<:AbsA})
     PopException(must::Bool)
@@ -47,10 +48,27 @@ struct A <: AbsA
     rhs::Instr
 end
 
+@as_record A
+
+mutable struct Cell
+    contents :: Any
+    Cell() = new()
+end
+
+Base.getindex(a::Cell) = a.contents
+Base.setindex!(a::Cell, v::T) where T = a.contents = v
+
+struct Closure{C, f}
+    closure :: C
+end
+
+(cf::Closure{C, f})(args...) where {C, f} = begin
+    f(cf.closure..., args...)
+end
+
 """
 TODO
 """
-mk_dyn_func(instrs::Vector{A}, argnames::Vector{Symbol}, globs::Dict{Symbol, Any}) = instrs
 
 
 function callpy(f::PyObject, args...)
@@ -178,7 +196,10 @@ str_yield_sym(s::String) = Symbol(s)
         end
 
         function to_jl_instr(::Val{:PyGlob}, instr::PyObject)
-            PyGlob(str_yield_sym(instr.qual), Symbol(instr.name))
+            name = instr.name
+            is_aggresive && return Value(glob_vals[Symbol(name)])
+            ptr = getfield(r_globals, :o)
+            PyGlob(ptr, instr.name)
         end
 
         function to_jl_instr(::Val{:UnwindBlock}, instr::PyObject)
@@ -212,7 +233,40 @@ str_yield_sym(s::String) = Symbol(s)
                 error("FATAL: not a PyCodeInfo!")
             end
             jl_instrs = to_jl_instrs(py."instrs")
-            mk_dyn_func(jl_instrs, Symbol[Symbol(a) for a in py."argnames"], glob_vals)
+            lineno = py.lineno
+            filename = py.filename
+            line = LineNumberNode(lineno, filename)
+            # TODO: need more position information from Instrs
+
+            argnames = Symbol[Symbol(a) for a in py."argnames"]
+            cellvars = Symbol[Symbol(a) for a in py."cellvars"]
+            freevars = Symbol[Symbol(a) for a in py."freevars"]
+            suite = map(code_gen, jl_instrs)
+            type_stable_shared_bounds = get(operator, "type_stable_shared_bounds")
+                true
+            end
+            MKBoundCell = type_stable_shared_bounds ? Ref : Cell
+            function mk_cell_var(n::Symbol)
+                n in argnames && return :($n = $MKBoundCell($n))
+                :($n = $Cell())
+            end
+            predef = Expr[mk_cell_var(e) for e in cellvars]
+            push!(predef, :(__object_stack__ = ()))
+            if any(x -> x isa UnwindBlock, instrs)
+                push!(predef, :(__exception_stack__ = ()))
+            end
+            body = Expr(:block, line, predef..., suite...)
+            Body = to_type(body)
+
+            FreeTy = type_stable_shared_bounds ? Union{Ref, Cell} : Cell
+
+            # free vars
+            allargs = Argument[Argument(arg, FreeTy, Unset()) for arg in freevars]
+            # args
+            append!(allargs, Argument[Argument(arg, nothing, Unset()) for arg in argnames])
+
+            Args = to_type(allargs)
+            RuntimeFn{Args, TNil{Argument}, Body}()
         end
 
         @info :rest
@@ -223,7 +277,7 @@ str_yield_sym(s::String) = Symbol(s)
         r_module = func_info.r_module
 
         @info :more
-        glob_vals = Dict{Symbol, Any}()
+        glob_vals = nothing
 
         is_aggresive = get(r_options, "aggresive") do
             true
@@ -236,23 +290,23 @@ str_yield_sym(s::String) = Symbol(s)
 
                 o = r_globals."get" <| [k]
 
-                o == PyNULL() && error("Undefined global variable $k at module $r_module.")
+                o == py_none && error("Undefined global variable $k at module $r_module.")
 
                 k = Symbol(k)
 
-                glob_vals[k] = if py_hasattr <| (o, "__jit__")
+                glob_vals[k] = if PyAny(py_hasattr <| (o, "__jit__"))
                     PyAny(o."jit")
                 else
                     PyAny(o)
                 end
             end
         else
+            glob_vals = r_globals
             # error("not impl") # TODO
         end
 
-        @info :redy
+        @info :redy glob_vals
         fp = to_jl_fptr(func_info."r_codeinfo")
-        @info :done
         pycall(bridge_push!, PyObject, fp)
     end
 
@@ -283,4 +337,111 @@ end
 function py_add
 end
 
+function peek(::Val{0}, tp::Tuple{A, B})::A where {A, B}
+    tp[1]
+end
+
+function peek(::Val{n}, tp::Tuple{A, B})::A where {n, A, B}
+    peek(Val(n-1), tp[2])
+end
+
+_repr_to_expr(r::Reg) = r.n
+_repr_to_expr(r::Const{T}) where T = r.val
+
+function code_gen(ass::A)
+    lhs = ass.lhs
+    rhs = code_gen(ass.rhs)
+    lhs === nothing && return rhs
+    :($lhs = $rhs)
+end
+
+function code_gen(instr::Instr)
+    @match instr begin
+        Value(v) => v
+        App(f, args) =>
+            let
+                f = _repr_to_expr(f)
+                args = map(_repr_to_expr, args)
+                Expr(:call, f, args...)
+            end
+        Ass(reg, val) =>
+            let
+                reg = reg.n
+                val = _repr_to_expr(val)
+                :($reg = $val)
+            end
+        Load(reg) =>
+            let reg = reg.n
+                :($reg[])
+            end
+        Store(reg, val) =>
+            let reg = reg.n
+                val = _repr_to_expr(val)
+                :($reg[] = $val)
+            end
+        JmpIf(label, cond) =>
+            let cond = _repr_to_expr(cond)
+                :(if $cond; @goto $label end)
+            end
+        JmpIfPush(label, cond, leave) =>
+            let cond = _repr_to_expr(cond)
+                leave = _repr_to_expr(cond)
+                :(
+                    if $cond
+                    __object_stack__ = ($leave, __object_stack__)
+                    @goto $label
+                    end
+                )
+            end
+        Label(label) => :(@label $label)
+        Peek($n) => :($peek($Val($n), __object_stack__))
+        Return(val) =>
+            let val = _repr_to_expr(val)
+                :(return $val)
+            end
+        Push(val) =>
+            let val = _repr_to_expr(val)
+                :(__object_stack__ = ($val, __object_stack__))
+            end
+        Pop() => quote
+                let v = __object_stack__[1]
+                    __object_stack__ = __object_stack__[2]
+                    v
+                end
+            end
+        PyGlob(ptr, name) => :($getproperty($PyObject($ptr), $name))
+        JlGlob(:RestrainJIT, name) => :($RestrainJIT.$name)
+        UnwindBlock(instrs) =>
+            let suite = map(code_gen, instrs)
+                :(
+                    try
+                        $(suite...)
+                    catch e
+                        __exception_stack__ = (e, __exception_stack__)
+                    end
+                )
+            end
+        PopException(false) =>
+                :(
+                    if isempty(__exception_stack__)
+                        nothing
+                    else
+                        let e = __exception_stack__[1]
+                            __exception_stack__ = __exception_stack__[2]
+                            e
+                        end
+                    end
+                :)
+        PopException(true) =>
+            :(
+                let e = __exception_stack__[1]
+                    __exception_stack__ = __exception_stack__[2]
+                    e
+                end
+            )
+    end
+end
+
 end # module
+
+
