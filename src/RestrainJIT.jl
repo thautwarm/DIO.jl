@@ -2,12 +2,15 @@ __precompile__(true)
 module RestrainJIT
 using PyCall
 using MLStyle
-import GeneralizedGenerated: Typeable, to_type, from_type, to_typelist, RuntimeFn, Argument, Unset, TNil
-import DataStructures: list
+import DataStructures: list, OrderedSet, Cons, Nil, LinkedList, nil, cons
 using CanonicalTraits: @trait, @implement
+List = LinkedList
+PyObject_struct = PyCall.PyObject_struct
+PyPtr_NULL = PyCall.PyPtr_NULL
 
-
-@implement Typeable{Ptr{T}} where T
+include("py_apis.jl")
+include("typeable.jl")
+include("runtime_funcs.jl")
 
 @use UppercaseCapturing
 
@@ -41,8 +44,8 @@ abstract type AbsA end
     Peek(offset::Int)
     Return(val::Repr)
     Push(val::Repr)
-    Pop();
-    PyGlob(qual::Ptr{PyCall.PyObject_struct}, name::String)
+    Pop()
+    PyGlob(qual::Ptr{PyObject_struct}, sym::Symbol)
     JlGlob(qual::Union{Nothing, Symbol}, name::Symbol)
     UnwindBlock(instrs::Vec{<:AbsA})
     PopException(must::Bool)
@@ -84,11 +87,34 @@ end
 str_yield_sym(::Nothing) = nothing
 str_yield_sym(s::String) = Symbol(s)
 
+function fresh_when_executing(vec::Vector{T}) where T
+    :[$((fresh_when_executing(e) for e in vec)...)]
+end
+
+function fresh_when_executing(set::Set{T}) where T
+    Expr(:call, Set, :[$((fresh_when_executing(e) for e in vec)...)])
+end
+
+
+function fresh_when_executing(d::Dict{K, V}) where {K, V}
+    Expr(:call, Dict, (fresh_when_executing(e) for (k, v) in d)...)
+end
+
+fresh_when_executing(x::AbstractString) = x
+
+function fresh_when_executing(d)
+     isimmutable(d) && return d
+     error("data $d not isimmutable")
+end
+
+# TODO: more heap-allocated isimmutable types
 
 @noinline function mk_restrain_infr!()
     f <| args = callpy(f, args...)
 
     jl_protocol_m = pyimport("restrain_jit.bejulia.jl_protocol")
+    PySymbol = pyimport("restrain_jit.vm.am").Symbol
+
     bridge = jl_protocol_m."bridge"
     bridge_pop! = bridge."pop"
     bridge_push! = bridge."append"
@@ -104,25 +130,7 @@ str_yield_sym(s::String) = Symbol(s)
     py_true = pybuiltin("True")
     py_getitem = pyimport("operator")."getitem"
     py_hasattr = pybuiltin("hasattr")
-
-
-    instr_m = pyimport("restrain_jit.bejulia.instructions")
-    i_App = instr_m."App"
-    i_Ass = instr_m."Ass"
-    i_Load = instr_m."Load"
-    i_Store = instr_m."Store"
-    i_JmpIf = instr_m."JmpIf"
-    i_Jmp = instr_m."Jmp"
-    i_JmpIfPush = instr_m."JmpIfPush"
-    i_Label = instr_m."Label"
-    i_Peek = instr_m."Peek"
-    i_Return = instr_m."Return"
-    i_Push = instr_m."Push"
-    i_Pop = instr_m."Pop"
-    i_PyGlob = instr_m."PyGlob"
-    i_JlGlob = instr_m."JlGlob"
-    i_UnwindBlock = instr_m."UnwindBlock"
-    i_PopException = instr_m."PopException"
+    py_set = pybuiltin("set")
 
     repr_m = pyimport("restrain_jit.bejulia.representations")
     i_Const = repr_m."Const"
@@ -141,7 +149,12 @@ str_yield_sym(s::String) = Symbol(s)
             if (pyisa <| [py, PyCodeInfo]) == py_true
                 return Const(to_jl_fptr(py))
             end
-            Const(PyAny(py."val"))
+            val = PyAny(py."val")
+            if pyisa(val, PySymbol) == py_true
+                val = QuoteNode(Symbol(val.s))
+            end
+            isimmutable(val) && return Const(val)
+            Const(fresh_when_executing(val))
         end
 
         to_jl_repr(repr::PyObject)::Repr =
@@ -199,9 +212,17 @@ str_yield_sym(s::String) = Symbol(s)
 
         function to_jl_instr(::Val{:PyGlob}, instr::PyObject)
             name = instr.name
-            is_aggresive && return Value(glob_vals[Symbol(name)])
+            is_aggresive && begin
+                sym = Symbol(name)
+                if sym ∉ undef_yet
+                    a = glob_vals[sym]
+                    !isa(a, PyObject) && return Value(a)
+                end
+                true
+            end
+
             ptr = getfield(r_globals, :o)
-            PyGlob(ptr, instr.name)
+            PyGlob(ptr, Symbol(name))
         end
 
         function to_jl_instr(::Val{:UnwindBlock}, instr::PyObject)
@@ -267,49 +288,52 @@ str_yield_sym(s::String) = Symbol(s)
             # args
             append!(allargs, Argument[Argument(arg, nothing, Unset()) for arg in argnames])
 
-            Args = to_type(list(allargs...))
+            Args = to_typelist(allargs)
             RuntimeFn{Args, TNil{Argument}, Body}()
         end
 
-        @info :rest
         r_options = func_info.r_options
         r_globals = func_info."r_globals"
         r_codeinfo = func_info."r_codeinfo"
         glob_deps = r_codeinfo."glob_deps"
         r_module = func_info.r_module
+        r_attrnames = func_info."r_attrnames"
 
-        @info :more
         glob_vals = nothing
 
         is_aggresive = get(r_options, "aggresive") do
             true
         end
-
-        @info :ok
+        undef_yet = Symbol[]
         if is_aggresive
             glob_vals = Dict{Symbol, Any}()
             for k in glob_deps
 
                 o = r_globals."get" <| [k]
-
-                o == py_none && error("Undefined global variable $k at module $r_module.")
-
                 k = Symbol(k)
+                if o == py_none
+                    try
+                        o = pybuiltin(k)
+                    catch e
+                        if e isa KeyError()
+                            push!(undef_yet, k)
+                            continue
+                        end
+                        rethrow()
+                    end
+                end
 
                 glob_vals[k] = if PyAny(py_hasattr <| (o, "__jit__"))
                     PyAny(o."__jit__")
                 else
                     PyAny(o)
                 end
+
             end
         else
             glob_vals = r_globals
-            # error("not impl") # TODO
         end
-
-        @info :redy glob_vals
-        fp = to_jl_fptr(func_info."r_codeinfo")
-        @info :done
+        fp = to_jl_fptr(r_codeinfo)
         pycall(bridge_push!, PyObject, fp)
     end
 
@@ -323,20 +347,6 @@ str_yield_sym(s::String) = Symbol(s)
         0
     end
     restrain_jl_side_aware!
-end
-
-
-function py_mk_tuple
-end
-
-function py_mk_func
-end
-
-
-function py_mk_closure
-end
-
-function py_add
 end
 
 function peek(::Val{0}, tp::Tuple{A, B})::A where {A, B}
@@ -364,7 +374,7 @@ function code_gen(instr::Instr)
             let
                 f = _repr_to_expr(f)
                 args = map(_repr_to_expr, args)
-                Expr(:call, f, args...)
+                Expr(:call, py_call_func, f, args...)
             end
         Ass(reg, val) =>
             let
@@ -381,6 +391,7 @@ function code_gen(instr::Instr)
                 val = _repr_to_expr(val)
                 :($reg[] = $val)
             end
+        Jmp(label) => :(@goto $label)
         JmpIf(label, cond) =>
             let cond = _repr_to_expr(cond)
                 :(if $cond; @goto $label end)
@@ -411,7 +422,7 @@ function code_gen(instr::Instr)
                     v
                 end
             end
-        PyGlob(ptr, name) => :($getproperty($PyObject($ptr), $name))
+        PyGlob(ptr, sym) => :($py_load_global($ptr, $(Val(sym))))
         JlGlob(:RestrainJIT, name) => :($RestrainJIT.$name)
         UnwindBlock(instrs) =>
             let suite = map(code_gen, instrs)
@@ -441,6 +452,7 @@ function code_gen(instr::Instr)
                     e
                 end
             )
+        a => error("Unknown instruction: $a")
     end
 end
 
