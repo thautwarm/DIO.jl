@@ -24,8 +24,8 @@ function init!()
     fp = pyimport("restrain_jit.bejulia.functional")
     py_id = pybuiltin("id")
 
-    fp.map.__jit__ = Functional.py_fast_map
-    native_ptrs[py_id(fp.map)] = Functional.py_fast_map
+    fp.select.__jit__ = Functional.py_fast_map
+    native_ptrs[py_id(fp.select)] = Functional.py_fast_map
     fp.foreach.__jit__ = Functional.py_fast_foreach
     native_ptrs[py_id(fp.foreach)] = Functional.py_fast_foreach
 
