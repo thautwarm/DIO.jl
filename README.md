@@ -1,6 +1,6 @@
 # RestrainJIT.jl
 
-Julia implementation for Python Restrain Jit
+Julia implementation for [Python Restrain Jit](https://github.com/thautwarm/restrain-jit/)
 
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://thautwarm.github.io/RestrainJIT.jl/stable)
