@@ -118,7 +118,7 @@ end
 
 @generated function py_is_none(p::PyObject)
     py_none = pybuiltin("None")
-    :($py_none == p)
+    :($py_is($py_none, p))
 end
 
 function py_is_none(p)
@@ -153,7 +153,7 @@ end
     else
         quote
             v = get(py_mod, PyObject, $s, $py_none)
-            v === $py_none && return $builtin
+            py_is(v, $py_none) && return $builtin
             v
         end
     end
