@@ -91,10 +91,11 @@ end
 
 
         function to_jl_const(py::PyObject) :: Const
-            if (pyisa <| [py."val", PyCodeInfo]) == py_true
-                return Const(to_jl_fptr(py))
+            val = py."val"
+            if (pyisa <| [val, PyCodeInfo]) == py_true
+                return Const(to_jl_fptr(val))
             end
-            val = PyAny(py."val")
+            val = PyAny(val)
             if pyisa(val, PySymbol) == py_true
                 val = QuoteNode(Symbol(val.s))
             elseif pyisa(val, PyValSymbol) == py_true

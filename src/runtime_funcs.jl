@@ -1,4 +1,4 @@
-struct YARuntimeFn{Args, Body} end
+struct YARuntimeFn{Args, Body} <: Function end
 
 @implement Typeable{YARuntimeFn{Args, Body}} where {Args, Body}
 
@@ -6,7 +6,7 @@ struct YARuntimeFn{Args, Body} end
 """
 functions that depend on julia level global variables
 """
-struct GYARuntimeFn{GlobTuple, Args, Body}
+struct GYARuntimeFn{GlobTuple, Args, Body} <: Function
     globals :: GlobTuple
 end
 

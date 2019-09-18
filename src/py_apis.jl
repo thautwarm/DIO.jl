@@ -1,8 +1,7 @@
 function py_mk_tuple
 end
 
-function py_mk_func
-end
+py_mk_func(::String, f::T) where T <: Function = f
 
 function py_mk_closure
 end
