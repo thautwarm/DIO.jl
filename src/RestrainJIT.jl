@@ -2,9 +2,7 @@ __precompile__(true)
 module RestrainJIT
 using PyCall
 using MLStyle
-import DataStructures: list, OrderedSet, Cons, Nil, LinkedList, nil, cons
-using CanonicalTraits: @trait, @implement
-List = LinkedList
+import DataStructures: list, OrderedSet
 PyObject_struct = PyCall.PyObject_struct
 PyPtr_NULL = PyCall.PyPtr_NULL
 
@@ -45,7 +43,7 @@ abstract type AbsA end
     Return(val::Repr)
     Push(val::Repr)
     Pop()
-    PyGlob(qual::Ptr{PyObject_struct}, sym::Symbol)
+    PyGlob(sym::Symbol)
     JlGlob(qual::Union{Nothing, Symbol}, name::Symbol)
     UnwindBlock(instrs::Vec{<:AbsA})
     PopException(must::Bool)
@@ -214,15 +212,14 @@ end
             name = instr.name
             is_aggresive && begin
                 sym = Symbol(name)
-                if sym ∉ undef_yet
-                    a = glob_vals[sym]
-                    !isa(a, PyObject) && return Value(a)
-                end
+                sym ∉ undef_yet &&
+                    begin
+                        i = findfirst(==(sym), GlobDeps)
+                        return Value(:(__persistent_globals__[$i]))
+                    end
                 true
             end
-
-            ptr = getfield(r_globals, :o)
-            PyGlob(ptr, Symbol(name))
+            PyGlob(Symbol(name))
         end
 
         function to_jl_instr(::Val{:UnwindBlock}, instr::PyObject)
@@ -256,6 +253,8 @@ end
                 error("FATAL: not a PyCodeInfo!")
             end
             jl_instrs = to_jl_instrs(py."instrs")
+            cur_glob_deps = Tuple(map(Symbol, py.glob_deps))
+
             lineno = py.lineno
             filename = py.filename
             line = LineNumberNode(lineno, filename)
@@ -280,16 +279,12 @@ end
             end
             body = Expr(:block, line, predef..., suite...)
             Body = to_type(body)
-
-            FreeTy = type_stable_shared_bounds ? Union{Ref, Cell} : Cell
-
-            # free vars
-            allargs = Argument[Argument(arg, FreeTy, Unset()) for arg in freevars]
-            # args
-            append!(allargs, Argument[Argument(arg, nothing, Unset()) for arg in argnames])
-
-            Args = to_typelist(allargs)
-            RuntimeFn{Args, TNil{Argument}, Body}()
+            Args = (freevars..., argnames...)
+            if any((x -> x in cur_glob_deps).(GlobDeps))
+                :($GYARuntimeFn{$GlobTupleType, $Args, $Body}(__persistent_globals__))
+            else
+                YARuntimeFn{Args, Body}()
+            end
         end
 
         r_options = func_info.r_options
@@ -299,6 +294,8 @@ end
         r_module = func_info.r_module
         r_attrnames = func_info."r_attrnames"
 
+        GlobDeps = ()
+        GlobTuple = ()
         glob_vals = nothing
 
         is_aggresive = get(r_options, "aggresive") do
@@ -328,12 +325,21 @@ end
                 else
                     PyAny(o)
                 end
-
             end
-        else
-            glob_vals = r_globals
+            GlobDeps = Tuple(keys(glob_vals))
+            GlobTuple = (x -> glob_vals[x]).(GlobDeps)
         end
+
+        if !isempty(undef_yet)
+            GlobDeps = (Symbol("python global ref"), GlobDeps...)
+            GlobTuple = (r_globals, GlobTuple...)
+        end
+        GlobTupleType = typeof(GlobTuple)
+
         fp = to_jl_fptr(r_codeinfo)
+        @when :($_{$_, $args, $body}($_)) = fp begin
+            fp = GYARuntimeFn{GlobTupleType, args, body}(GlobTuple)
+        end
         pycall(bridge_push!, PyObject, fp)
     end
 
@@ -343,6 +349,10 @@ end
             jit_impl(py)
         catch e
             pyraise(e)
+            for (exc, bt) in Base.catch_stack()
+                showerror(stdout, exc, bt)
+                println()
+            end
         end
         0
     end
@@ -422,7 +432,7 @@ function code_gen(instr::Instr)
                     v
                 end
             end
-        PyGlob(ptr, sym) => :($py_load_global($ptr, $(Val(sym))))
+        PyGlob(sym) => :($py_load_global(__persistent_globals__[0], $(Val(sym))))
         JlGlob(:RestrainJIT, name) => :($RestrainJIT.$name)
         UnwindBlock(instrs) =>
             let suite = map(code_gen, instrs)

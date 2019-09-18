@@ -7,19 +7,20 @@ end
 function py_mk_closure
 end
 
-function py_add(a::Int, b::Int)
+
+@generated function py_add(a, b)
+    val = Val((a <: PyObject) || (b <: PyObject))
+    :(py_add(a, b, $val))
+end
+
+
+@generated function py_add(a, b, is_py::Val{true})
+    f = pyimport("operator").add
+    :(pycall($f, PyObject, a, b))
+end
+
+function py_add(a, b, is_py::Val{false})
     a + b
-end
-
-@generated function py_add(a::PyObject, b::Int)
-    f = pyimport("operator").add
-    :(pycall(f, PyObject, a, b))
-end
-
-
-@generated function py_add(a::Int, b::PyObject)
-    f = pyimport("operator").add
-    :(pycall(f, PyObject, a, b))
 end
 
 @generated function py_get_attr(p::PyObject, ::Val{Attr}) where Attr
@@ -41,23 +42,32 @@ end
 
 
 struct PyIterHelper
-    next::PyPtr
+    next::PyObject
 end
 
 @generated function (iter::PyIterHelper)()
     stop_exc = PyCall.@pyglobalobjptr :PyExc_StopIteration
     ok = Cint(1)
     quote
-        v = ccall((@pysym :PyObject_CallObject), PyPtr, (PyPtr, PyPtr), iter.next, PyPtr_NULL)
-        exc = ccall((@pysym :PyErr_Occurred), PyPtr, ())
-        exc != C_NULL &&
-            if ccall((@pysym :PyErr_ExceptionMatches), Cint, (PyPtr, ), $stop_exc) === $ok
-                pyerr_clear()
-                return nothing
-            else
-                error("Python has thrown unexpected exception when iterating.")
-            end
-        (PyObject(v), iter)
+        PyCall.sigatomic_begin()
+        try
+            v = ccall((@pysym :PyObject_CallObject), PyPtr, (PyPtr, PyPtr), getfield(iter.next, :o), PyPtr_NULL)
+            exc = ccall((@pysym :PyErr_Occurred), PyPtr, ())
+            exc != C_NULL &&
+                begin
+                    if ccall((@pysym :PyErr_ExceptionMatches), Cint, (PyPtr, ), $stop_exc) === $ok
+                        pyerr_clear()
+                        return nothing
+                    else
+                        msg = "Python has thrown unexpected exception when iterating."
+                        pyerr = PyCall.PyError(msg)
+                        error("$msg\n$pyerr")
+                    end
+                end
+            (PyObject(v), iter)
+        finally
+            PyCall.sigatomic_end()
+        end
     end
 end
 
@@ -69,7 +79,7 @@ end
 (a::NextHelper)() = a
 
 function py_get_attr(p::PyObject, ::Val{:__next__}) where T
-    PyIterHelper(getfield(p."__next__", :o))
+    PyIterHelper(p."__next__")
 end
 
 function py_get_attr(p::Vector{T}, ::Val{:__iter__}) where T
@@ -89,6 +99,22 @@ function py_get_attr(p::Range, ::Val{:__iter__}) where Range <: AbstractUnitRang
 end
 
 py_get_attr(p::NextHelper{Iter}, ::Val{:__next__}) where Iter = p.i
+
+
+function py_for(f, it)
+    it = py_get_attr(it, Val(:__iter__))
+    next = py_get_attr(it(), Val(:__next__))
+    @label loop_s
+    it = next()
+    if a === nothing
+        @goto loop_f
+    end
+    elt = it[1]
+    next = it[2]
+    f(elt)
+    @goto loop_s
+    @label loop_f
+end
 
 @generated function py_is_none(p::PyObject)
     py_none = pybuiltin("None")
@@ -111,7 +137,7 @@ function py_subscr(subj::Tuple, item) where T
     subj[item + 1]
 end
 
-@generated function py_load_global(py_mod::PyPtr, sym::Val{Name}) where Name
+@generated function py_load_global(py_mod::PyObject, sym::Val{Name}) where Name
     py_none = pybuiltin("None")
     s = String(Name)
     builtin = nothing
@@ -120,16 +146,13 @@ end
     catch e
         !(e isa KeyError) && rethrow()
     end
-    py_str = PyObject(s)
     if builtin === nothing
         quote
-            py_mod = PyObject(py_mod)
-            get(py_mod, PyObject, $py_str)
+            get(py_mod, PyObject, $s)
         end
     else
         quote
-            py_mod = PyObject(py_mod)
-            v = get(py_mod, PyObject, $py_str, $py_none)
+            v = get(py_mod, PyObject, $s, $py_none)
             v === $py_none && return $builtin
             v
         end

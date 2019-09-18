@@ -1,54 +1,32 @@
-struct RuntimeFn{Args, Kwargs, Body} end
-struct Unset end
+struct YARuntimeFn{Args, Body} end
 
-@implement Typeable{RuntimeFn{Args, Kwargs, Body}} where {Args, Kwargs, Body}
+@implement Typeable{YARuntimeFn{Args, Body}} where {Args, Body}
 
 
-struct Argument
-    name    :: Symbol
-    type    :: Union{Nothing, Any}
-    default :: Union{Unset,  Any}
+"""
+functions that depend on julia level global variables
+"""
+struct GYARuntimeFn{GlobTuple, Args, Body}
+    globals :: GlobTuple
 end
 
-struct Arguments
-    args   :: Vector{Argument}
-    kwargs :: Vector{Argument}
-end
+@implement Typeable{GYARuntimeFn{GlobTuple, Args, Body}} where {GlobTuple, Args, Body}
 
-@implement Typeable{Unset}
-
-@implement Typeable{Argument} begin
-    to_type(arg) =
-        let f = Argument
-            args = [arg.name, arg.type, arg.default] |> to_typelist
-            TApp{Argument, f, args}
-        end
-end
-
-function _ass_positional_args!(assign_block::Vector{Expr}, args :: List{Argument}, ninput::Int, pargs :: Symbol)
+function _ass_positional_args!(assign_block::Vector{Expr}, args, ninput::Int, pargs :: Symbol)
+    length(args) > ninput && error("Input arguments too few.")
     i = 1
     for arg in args
-        ass = arg.name
-        if arg.type !== nothing
-            ass = :($ass :: $(arg.type))
-        end
-        if i > ninput
-            arg.default === Unset() && error("Input arguments too few.")
-            ass = :($ass = $(arg.default))
-        else
-            ass = :($ass = $pargs[$i])
-        end
+        ass = :($arg = $pargs[$i])
         push!(assign_block, ass)
         i += 1
     end
 end
 
-@generated function (::RuntimeFn{Args, TNil{Argument}, Body})(pargs...) where {Args, Body}
-    args   = interpret(Args)
+@generated function (::YARuntimeFn{Args, Body})(pargs...) where {Args, Body}
     ninput = length(pargs)
     assign_block = Expr[]
-    body = interpret(Body)
-    _ass_positional_args!(assign_block, args, ninput, :pargs)
+    body = from_type(Body)
+    _ass_positional_args!(assign_block, Args, ninput, :pargs)
     quote
         let $(assign_block...)
             $body
@@ -56,38 +34,15 @@ end
     end
 end
 
-@generated function (::RuntimeFn{Args, Kwargs, Body})(pargs...; pkwargs...) where {Args, Kwargs, Body}
-    args   = interpret(Args)
-    kwargs = interpret(Kwargs)
+@generated function (g::GYARuntimeFn{GlobTuple, Args, Body})(pargs...) where {
+    GlobTuple, Args, Body
+}
     ninput = length(pargs)
     assign_block = Expr[]
-    body = interpret(Body)
-    if isempty(kwargs)
-        _ass_positional_args!(assign_block, args, ninput, :pargs)
-    else
-        function get_kwds(::Type{Base.Iterators.Pairs{A, B, C, NamedTuple{Kwds,D}}}) where {Kwds, A, B, C, D}
-            Kwds
-        end
-        kwds = gensym("kwds")
-        feed_in_kwds = get_kwds(pkwargs)
-        push!(assign_block, :($kwds = pkwargs))
-        _ass_positional_args!(assign_block, args, ninput, :pargs)
-        for kwarg in kwargs
-            ass = k = kwarg.name
-            if kwarg.type !== nothing
-                ass = :($ass :: $(kwarg.type))
-            end
-            if k in feed_in_kwds
-                ass = :($ass = $kwds[$(QuoteNode(k))])
-            else
-                default = kwarg.default
-                default === Unset() && error("no default value for keyword argument $(k)")
-                ass = :($ass = $default)
-            end
-            push!(assign_block, ass)
-        end
-    end
+    body = from_type(Body)
+    _ass_positional_args!(assign_block, Args, ninput, :pargs)
     quote
+        __persistent_globals__ = g.globals
         let $(assign_block...)
             $body
         end
