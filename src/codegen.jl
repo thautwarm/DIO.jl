@@ -135,7 +135,7 @@ end
 
 
         function to_jl_const(py::PyObject) :: Const
-            if (pyisa <| [py, PyCodeInfo]) == py_true
+            if (pyisa <| [py."val", PyCodeInfo]) == py_true
                 return Const(to_jl_fptr(py))
             end
             val = PyAny(py."val")
@@ -305,7 +305,8 @@ end
                     try
                         o = pybuiltin(k)
                     catch e
-                        if e isa KeyError()
+                        if e isa KeyError
+                            pyerr_clear()
                             push!(undef_yet, k)
                             continue
                         end
