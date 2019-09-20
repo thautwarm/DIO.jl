@@ -199,7 +199,7 @@ str_yield_sym(s::String) = Symbol(s)
 
 # if any globals referenced, it's a 'GYARuntimeFn',
 # otherwise a 'YARuntimeFn'
-            if any((x -> x in cur_glob_deps).(const_glob_names))
+            if any((x -> x in cur_glob_deps).(glob_dep_syms))
                 :($GYARuntimeFn{$glob_tuple_type, $Args, $Body}(__persistent_globals__))
             else
                 YARuntimeFn{Args, Body}()
@@ -232,6 +232,8 @@ str_yield_sym(s::String) = Symbol(s)
         end
 
 # according to user setting, we can have more const global Python objects
+        # look from python 'globals'
+        py_look = (i -> glob_dep_syms[i]).(left_indices) |> Set
         pragma_const_globals = get(r_options, "const_globals", false) === true
         if !py_is(r_ann, py_none) || pragma_const_globals # no prospective pragmas
             @inbounds for i in left_indices
@@ -243,6 +245,7 @@ str_yield_sym(s::String) = Symbol(s)
                     if py_is(o, py_none) # TODO: maybe user wants to mark const glob var valued None?
                         o = pybuiltin(k)
                     end
+                    delete!(py_look, sym)
                     push!(const_glob_names, sym)
                     push!(const_globs, o)
                 end
@@ -250,7 +253,7 @@ str_yield_sym(s::String) = Symbol(s)
         end
 
 # if any other non-const globals, we need to store the python's dictionary('globals()')
-        if length(const_glob_names) < length(glob_dep_syms)
+        if !isempty(py_look)
             pushfirst!(const_globs, r_globals)
             pushfirst!(const_glob_names, Symbol("python globals"))
         end
@@ -358,7 +361,7 @@ function code_gen(instr::Instr)
                     v
                 end
             end
-        PyGlob(sym) => :($py_load_global(__persistent_globals__[0], $(Val(sym))))
+        PyGlob(sym) => :($py_load_global(__persistent_globals__[1], $(Val(sym))))
         JlGlob(:RestrainJIT, name) => :($RestrainJIT.$name)
         UnwindBlock(instrs) =>
             let suite = map(code_gen, instrs)

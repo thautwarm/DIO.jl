@@ -122,22 +122,6 @@ end
 
 py_get_attr(p::NextHelper{Iter}, ::Val{:__next__}) where Iter = p.i
 
-
-function py_for(f, it)
-    it = py_get_attr(it, Val(:__iter__))
-    next = py_get_attr(it(), Val(:__next__))
-    @label loop_s
-    it = next()
-    if a === nothing
-        @goto loop_f
-    end
-    elt = it[1]
-    next = it[2]
-    f(elt)
-    @goto loop_s
-    @label loop_f
-end
-
 @generated function py_is_none(p::PyObject)
     py_none = pybuiltin("None")
     :($py_is($py_none, p))
@@ -147,16 +131,40 @@ function py_is_none(p)
     p === nothing
 end
 
+
+struct JlSlice{A, B, C}
+    start::A
+    end_::B
+    sep::C
+end
+
 function py_subscr(subj::PyObject, item)
     get(subj, PyObject, item)
 end
 
-function py_subscr(subj::Vector{T}, item) where T
+function py_subscr(subj::Vector{T}, item::Integer) where T
     subj[item + 1]
 end
 
-function py_subscr(subj::Tuple, item) where T
+function py_subscr(subj::Tuple, item::Integer) where T
     subj[item + 1]
+end
+
+function py_subscr(subj::Union{Tuple, Vector}, item::JlSlice{Nothing, A, B}) where {A, B}
+    py_subscr(subj, JlSlice(1, item.end_, item.sep))
+end
+
+function py_subscr(subj::Union{Tuple, Vector}, item::JlSlice{A, B, Nothing}) where {A, B}
+    py_subscr(subj, JlSlice(item.start, item.end_, 1))
+end
+
+function py_subscr(subj::Union{Tuple, Vector}, item::JlSlice{A, Nothing, B}) where {A, B}
+    py_subscr(subj, JlSlice(item.start, length(subj), item.sep))
+end
+
+# TODO: optimizing slice using UnitRange
+function py_subscr(subj::Union{Tuple, Vector}, item::JlSlice{I, I, I}) where I <: Integer
+    subj[item.start:item.sep:item.end_]
 end
 
 @generated function py_load_global(py_mod::PyObject, sym::Val{Name}) where Name
@@ -187,4 +195,18 @@ end
 
 function py_call_func(f, args...)
     f(args...)
+end
+
+# TODO: to support creating python slices
+@generated function py_build_slice(a, b)
+    :(JlSlice(a, b, nothing))
+end
+
+@generated function py_build_slice(a, b, c)
+    :(JlSlice(a, b, c))
+end
+
+
+function py_setitem(subj::Vector{T}, key::Integer, value::G) where {T, G <: T}
+    subj[key + 1] = value
 end
