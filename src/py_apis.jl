@@ -206,7 +206,27 @@ end
     :(JlSlice(a, b, c))
 end
 
-
+# TODO: for python objects
 function py_setitem(subj::Vector{T}, key::Integer, value::G) where {T, G <: T}
     subj[key + 1] = value
+end
+
+function py_call_method(self::PyObject, f::F, args...) where F
+    pycall(f, PyObject, self, args...)
+end
+
+function py_call_method(self, f::F, args...) where F
+    f(self, args...)
+end
+
+function py_mk_list()
+    []
+end
+
+function py_mk_list(xs...)
+    collect(xs)
+end
+
+function py_mk_tuple(xs...)
+    xs
 end

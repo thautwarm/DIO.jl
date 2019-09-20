@@ -218,10 +218,27 @@ str_yield_sym(s::String) = Symbol(s)
         const_glob_names = Symbol[]
 
 
+# some special globals/builtins
+        for (k, v) in special_globals
+            lookup = r_globals."get" <| [k]
+            expect = pybuiltin(k)
+            if py_is(lookup, py_none)
+                lookup = expect
+            end
+            !py_is(lookup, expect) && continue
+
+            i = findfirst(==(k), glob_deps)
+            i !== nothing && begin
+                push!(const_glob_names, Symbol(k))
+                push!(const_globs, pyrange)
+            end
+        end
+
 # all existing JIT stuffs are marked as const globals
         glob_dep_syms = map(Symbol, glob_deps)
         left_indices = Int[]
         for (i, (k, sym)) in enumerate(zip(glob_deps, glob_dep_syms))
+            haskey(special_globals, k) && continue
             o = r_globals."get" <| [k, py_none]
             if py_is(o, py_none) || ((py_hasattr <| [o, "__jit__"]) != py_true)
                 push!(left_indices, i)
@@ -237,8 +254,9 @@ str_yield_sym(s::String) = Symbol(s)
         pragma_const_globals = get(r_options, "const_globals", false) === true
         if !py_is(r_ann, py_none) || pragma_const_globals # no prospective pragmas
             @inbounds for i in left_indices
-                sym = glob_dep_syms[i]
                 k = glob_deps[i]
+                haskey(special_globals, k) && continue
+                sym = glob_dep_syms[i]
 
                 if py_is(r_ann."get" <| [k], const_pragma) || pragma_const_globals
                     o = r_globals."get" <| [k, py_none]

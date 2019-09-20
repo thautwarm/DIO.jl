@@ -24,7 +24,7 @@ function as_constant_expr(a::PyObject, ::Val)
     a
 end
 
-function as_constant_expr(a::PyObject, ::Union{Val{:int}, Val{:str}, Val{:complex}, Val{:float}, Val{:NoneType}})
+function as_constant_expr(a::PyObject, ::Union{Val{:int}, Val{:bool}, Val{:str}, Val{:complex}, Val{:float}, Val{:NoneType}})
     PyAny(n)
 end
 
@@ -76,7 +76,7 @@ function as_constant(a::PyObject, ::Val)
     a
 end
 
-function as_constant(a::PyObject, ::Union{Val{:int}, Val{:str}, Val{:complex}, Val{:float}, Val{:NoneType}})
+function as_constant(a::PyObject, ::Union{Val{:int}, Val{:bool}, Val{:str}, Val{:complex}, Val{:float}, Val{:NoneType}})
     PyAny(n)
 end
 
