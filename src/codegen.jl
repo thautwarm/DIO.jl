@@ -6,14 +6,6 @@ end
 Base.getindex(a::Cell) = a.contents
 Base.setindex!(a::Cell, v::T) where T = a.contents = v
 
-struct Closure{C, f}
-    closure :: C
-end
-
-(cf::Closure{C, f})(args...) where {C, f} = begin
-    f(cf.closure..., args...)
-end
-
 str_yield_sym(::Nothing) = nothing
 str_yield_sym(s::String) = Symbol(s)
 
@@ -86,6 +78,10 @@ str_yield_sym(s::String) = Symbol(s)
 
         function to_jl_instr(::Val{:Store}, instr::PyObject)
             Store(to_jl_reg(instr."reg"), to_jl_repr(instr."val"))
+        end
+
+        function to_jl_instr(::Val{:Load}, instr::PyObject)
+            Load(to_jl_reg(instr."reg"))
         end
 
         function to_jl_instr(::Val{:JmpIf}, instr::PyObject)

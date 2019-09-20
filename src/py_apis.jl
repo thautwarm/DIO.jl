@@ -230,3 +230,10 @@ end
 function py_mk_tuple(xs...)
     xs
 end
+
+
+function py_mk_closure(closure::Tp, f::F) where {F <: Function, Tp <: Tuple}
+    function (args...)
+        f(closure..., args...)
+    end
+end
