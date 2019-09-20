@@ -6,28 +6,41 @@ import DataStructures: list, OrderedSet
 PyObject_struct = PyCall.PyObject_struct
 PyPtr_NULL = PyCall.PyPtr_NULL
 
+function callpy(f::PyObject, args...)
+    pycall(f, PyObject, args...)
+end
+
+f <| args = callpy(f, args...)
+
+struct _Token end
+
 include("typeable.jl")
 include("runtime_funcs.jl")
 
 @use UppercaseCapturing
 
-# TODO: being awared by Python GC
-const native_ptrs = Dict{UInt64, Any}()
-get_native_ptr(i::UInt64) = native_ptrs[i]
-get_native_ptr(i) = get_native_ptr(UInt64(i))
+
+# for checking if global object is rewritten dirty
+const py_module_world_counters = Dict{UInt64, Dict{Symbol, Int}}()
+
+# module will never get freed, so it's safe to store its globals here.
+const py_module_globals = Dict{UInt64, PyObject}()
+
 include("instr_repr.jl")
+include("as_constants.jl")
+
 include("codegen.jl")
 include("py_apis.jl")
+include("collections.jl")
+
 include("functional.jl")
 
 function init!()
     fp = pyimport("restrain_jit.bejulia.functional")
-    py_id = pybuiltin("id")
 
     fp.select.__jit__ = Functional.py_fast_map
-    native_ptrs[py_id(fp.select)] = Functional.py_fast_map
     fp.foreach.__jit__ = Functional.py_fast_foreach
-    native_ptrs[py_id(fp.foreach)] = Functional.py_fast_foreach
+    fp.J.__jit__ = as_constant_expr
 
     mk_restrain_infr!()
 end

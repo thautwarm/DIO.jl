@@ -14,45 +14,14 @@ end
     f(cf.closure..., args...)
 end
 
-"""
-TODO
-"""
-
-function callpy(f::PyObject, args...)
-    pycall(f, PyObject, args...)
-end
-
-
 str_yield_sym(::Nothing) = nothing
 str_yield_sym(s::String) = Symbol(s)
-
-function fresh_when_executing(vec::Vector{T}) where T
-    :[$((fresh_when_executing(e) for e in vec)...)]
-end
-
-function fresh_when_executing(set::Set{T}) where T
-    Expr(:call, Set, :[$((fresh_when_executing(e) for e in vec)...)])
-end
-
-
-function fresh_when_executing(d::Dict{K, V}) where {K, V}
-    Expr(:call, Dict, (fresh_when_executing(e) for (k, v) in d)...)
-end
-
-fresh_when_executing(x::AbstractString) = x
-
-function fresh_when_executing(d)
-     isimmutable(d) && return d
-     error("data $d not isimmutable")
-end
 
 # TODO: more heap-allocated isimmutable types
 
 @inline py_is(a::PyObject, b::PyObject) = getfield(a, :o) === getfield(b, :o)
 
-
 @noinline function mk_restrain_infr!()
-    f <| args = callpy(f, args...)
 
     jl_protocol_m = pyimport("restrain_jit.bejulia.jl_protocol")
     PySymbol = pyimport("restrain_jit.vm.am").Symbol
@@ -61,7 +30,8 @@ end
     bridge = jl_protocol_m."bridge"
     bridge_pop! = bridge."pop"
     bridge_push! = bridge."append"
-
+    jit_info = pyimport("restrain_jit.bejulia.pragmas")
+    const_pragma = jit_info."const"
     julia_vm_m = pyimport("restrain_jit.bejulia.julia_vm")
     JuVM = julia_vm_m."JuVM"
 
@@ -78,8 +48,6 @@ end
 
 
     repr_m = pyimport("restrain_jit.bejulia.representations")
-    i_Const = repr_m."Const"
-    i_Reg = repr_m."Reg"
 
     function jit_impl(func_info:: PyObject)
 
@@ -88,7 +56,6 @@ end
         end
 
         to_jl_reg(py::PyObject) :: Reg = Reg(Symbol(py.n))
-
 
         function to_jl_const(py::PyObject) :: Const
             val = py."val"
@@ -101,8 +68,7 @@ end
             elseif pyisa(val, PyValSymbol) == py_true
                 val = Val(Symbol(val.s))
             end
-            isimmutable(val) && return Const(val)
-            Const(fresh_when_executing(val))
+            Const(as_constant_expr(val))
         end
 
         to_jl_repr(repr::PyObject)::Repr =
@@ -160,15 +126,9 @@ end
 
         function to_jl_instr(::Val{:PyGlob}, instr::PyObject)
             name = instr.name
-            is_aggresive && begin
-                sym = Symbol(name)
-                sym ∉ undef_yet &&
-                    begin
-                        i = findfirst(==(sym), GlobDeps)
-                        return Value(:(__persistent_globals__[$i]))
-                    end
-                true
-            end
+            sym = Symbol(name)
+            i = findfirst(==(sym), const_glob_names)
+            i !== nothing && return Value(:(__persistent_globals__[$i]))
             PyGlob(Symbol(name))
         end
 
@@ -214,24 +174,33 @@ end
             cellvars = Symbol[Symbol(a) for a in py."cellvars"]
             freevars = Symbol[Symbol(a) for a in py."freevars"]
             suite = map(code_gen, jl_instrs)
-            type_stable_shared_bounds = get(r_options, "type_stable_shared_bounds") do
+
+            type_stable_shared_bounds = get(r_options, "type_stable_closures") do
                 true
             end
             MKBoundCell = type_stable_shared_bounds ? Ref : Cell
+
             function mk_cell_var(n::Symbol)
                 n in argnames && return :($n = $MKBoundCell($n))
                 :($n = $Cell())
             end
+
             predef = Expr[mk_cell_var(e) for e in cellvars if e ∉ freevars]
             push!(predef, :(__object_stack__ = ()))
+
+            # check if any try blocks
             if any(x -> x isa UnwindBlock, jl_instrs)
                 push!(predef, :(__exception_stack__ = ()))
             end
+
             body = Expr(:block, line, predef..., suite...)
             Body = to_type(body)
             Args = (freevars..., argnames...)
-            if any((x -> x in cur_glob_deps).(GlobDeps))
-                :($GYARuntimeFn{$GlobTupleType, $Args, $Body}(__persistent_globals__))
+
+# if any globals referenced, it's a 'GYARuntimeFn',
+# otherwise a 'YARuntimeFn'
+            if any((x -> x in cur_glob_deps).(const_glob_names))
+                :($GYARuntimeFn{$glob_tuple_type, $Args, $Body}(__persistent_globals__))
             else
                 YARuntimeFn{Args, Body}()
             end
@@ -239,67 +208,70 @@ end
 
         r_options = func_info.r_options
         r_globals = func_info."r_globals"
+        r_ann = r_globals."get" <| ["__annotations__"]
         r_codeinfo = func_info."r_codeinfo"
-        glob_deps = r_codeinfo."glob_deps"
+        glob_deps = r_codeinfo.glob_deps
         r_module = func_info.r_module
         r_attrnames = func_info."r_attrnames"
 
-        GlobDeps = ()
-        GlobTuple = ()
-        glob_vals = nothing
+        const_globs = Any[]
+        const_glob_names = Symbol[]
 
-        is_aggresive = get(r_options, "aggresive") do
-            true
+
+# all existing JIT stuffs are marked as const globals
+        glob_dep_syms = map(Symbol, glob_deps)
+        left_indices = Int[]
+        for (i, (k, sym)) in enumerate(zip(glob_deps, glob_dep_syms))
+            o = r_globals."get" <| [k, py_none]
+            if py_is(o, py_none) || ((py_hasattr <| [o, "__jit__"]) != py_true)
+                push!(left_indices, i)
+                continue
+            end
+            push!(const_glob_names, sym)
+            push!(const_globs, o.__jit__)
         end
-        undef_yet = Symbol[]
-        if is_aggresive
-            glob_vals = Dict{Symbol, Any}()
-            for k in glob_deps
 
-                o = r_globals."get" <| [k]
-                k = Symbol(k)
-                if py_is(py_none, o)
-                    try
+# according to user setting, we can have more const global Python objects
+        pragma_const_globals = get(r_options, "const_globals", false) === true
+        if !py_is(r_ann, py_none) || pragma_const_globals # no prospective pragmas
+            @inbounds for i in left_indices
+                sym = glob_dep_syms[i]
+                k = glob_deps[i]
+
+                if py_is(r_ann."get" <| [k], const_pragma) || pragma_const_globals
+                    o = r_globals."get" <| [k, py_none]
+                    if py_is(o, py_none) # TODO: maybe user wants to mark const glob var valued None?
                         o = pybuiltin(k)
-                    catch e
-                        if e isa KeyError
-                            pyerr_clear()
-                            push!(undef_yet, k)
-                            continue
-                        end
-                        rethrow()
                     end
-                end
-
-                addr = UInt(py_id(o))
-                glob_vals[k] = if PyAny(py_hasattr <| (o, "__jit__")) && haskey(native_ptrs, addr)
-                    native_ptrs[addr]
-                else
-                    PyAny(o)
+                    push!(const_glob_names, sym)
+                    push!(const_globs, o)
                 end
             end
-            GlobDeps = Tuple(keys(glob_vals))
-            GlobTuple = (x -> glob_vals[x]).(GlobDeps)
         end
 
-        if !isempty(undef_yet)
-            GlobDeps = (Symbol("python global ref"), GlobDeps...)
-            GlobTuple = (r_globals, GlobTuple...)
+# if any other non-const globals, we need to store the python's dictionary('globals()')
+        if length(const_glob_names) < length(glob_dep_syms)
+            pushfirst!(const_globs, r_globals)
+            pushfirst!(const_glob_names, Symbol("python globals"))
         end
-        GlobTupleType = typeof(GlobTuple)
+
+# make the function ptr
+        const_glob_names = Tuple(const_glob_names)
+        const_globs = Tuple(const_globs)
+        glob_tuple_type = typeof(const_globs)
 
         fp = to_jl_fptr(r_codeinfo)
         @when :($_{$_, $args, $body}($_)) = fp begin
-            fp = GYARuntimeFn{GlobTupleType, args, body}(GlobTuple)
+            fp = GYARuntimeFn{glob_tuple_type, args, body}(const_globs)
         end
         fp
     end
 
     function restrain_jl_side_aware!()
-        id, py = pycall(bridge_pop!, PyObject)
+        py = pycall(bridge_pop!, PyObject)
         try
             fp = jit_impl(py)
-            native_ptrs[id] = fp
+            # native_ptrs[id] = fp
             pycall(bridge_push!, PyObject, fp)
             fp
         catch e

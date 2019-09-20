@@ -4,7 +4,7 @@ struct YARuntimeFn{Args, Body} <: Function end
 
 
 """
-functions that depend on julia level global variables
+functions that depend on global variables
 """
 struct GYARuntimeFn{GlobTuple, Args, Body} <: Function
     globals :: GlobTuple
