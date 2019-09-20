@@ -22,6 +22,30 @@ function py_add(a, b, is_py::Val{false})
     a + b
 end
 
+@generated function py_not(a)
+    val = Val(a <: PyObject)
+    :(py_not(a, $val))
+end
+
+function py_not(a, is_py::Val{true})
+    PyCall.sigatomic_begin()
+    try
+        err = ccall(@pysym(:PyObject_IsTrue), Cint, (PyPtr,), a)
+        if err === 0
+            @pysym(:Py_True)
+        else
+            @pysym(:Py_False)
+        end
+    finally
+        PyCall.sigatomic_end()
+    end
+end
+
+
+function py_not(a, is_py::Val{false})
+    !a
+end
+
 @generated function py_get_attr(p::PyObject, ::Val{Attr}) where Attr
     attr = String(Attr)
     :(p.$attr)
@@ -65,7 +89,6 @@ end
                 end
             (PyObject(v), iter)
         finally
-            PyCall.sigatomic_end()
         end
     end
 end
