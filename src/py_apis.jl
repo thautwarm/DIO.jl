@@ -27,14 +27,17 @@ end
     :(py_not(a, $val))
 end
 
-@generated function py_not(a, is_py::Val{true})
-#     f = pyimport("operator").not
-#     :(py_call($f, PyObject, a))
-    err = ccall(@pysym(:PyObject_IsTrue), Cint, (PyPtr,), a)
-    if err === 0
-        @pysym(:Py_True)
-    else
-        @pysym(:Py_False)
+function py_not(a, is_py::Val{true})
+    PyCall.sigatomic_begin()
+    try
+        err = ccall(@pysym(:PyObject_IsTrue), Cint, (PyPtr,), a)
+        if err === 0
+            @pysym(:Py_True)
+        else
+            @pysym(:Py_False)
+        end
+    finally
+        PyCall.sigatomic_end()
     end
 end
 
@@ -86,7 +89,6 @@ end
                 end
             (PyObject(v), iter)
         finally
-            PyCall.sigatomic_end()
         end
     end
 end
