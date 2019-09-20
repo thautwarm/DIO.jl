@@ -22,6 +22,27 @@ function py_add(a, b, is_py::Val{false})
     a + b
 end
 
+@generated function py_not(a)
+    val = Val(a <: PyObject)
+    :(py_not(a, $val))
+end
+
+@generated function py_not(a, is_py::Val{true})
+#     f = pyimport("operator").not
+#     :(py_call($f, PyObject, a))
+    err = ccall(@pysym(:PyObject_IsTrue), Cint, (PyPtr,), a)
+    if err === 0
+        @pysym(:Py_True)
+    else
+        @pysym(:Py_False)
+    end
+end
+
+
+function py_not(a, is_py::Val{false})
+    !a
+end
+
 @generated function py_get_attr(p::PyObject, ::Val{Attr}) where Attr
     attr = String(Attr)
     :(p.$attr)
