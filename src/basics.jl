@@ -9,7 +9,7 @@ pyrange(b) = 0:b-1
 pyrange(a, b) = a:b-1
 pyrange(a, b, c) = a:c:b-1
 
-special_globals = Dict{String, Any}("range" => pyrange)
+special_globals = Dict{String, Any}("range" => pyrange, "len" => length)
 
 function init_jl_basics!()
     py_mod = pyimport("restrain_jit.bejulia.basics")
