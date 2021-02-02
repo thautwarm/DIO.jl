@@ -1,4 +1,7 @@
-export DIO_Obj, @DIO_Obj
+export @DIO_Obj, DIO_IncRef, DIO_DecRef, DIO_Undef
+export DIO_ChkExc, DIO_ChkExcAndDecRefSubCall, DIO_ExceptCode
+export @DIO_MakePyFastCFunc
+
 struct DIO_UndefType end
 const DIO_Undef = DIO_UndefType()
 
@@ -102,23 +105,37 @@ end
 
 DIO_ExceptCode(f::Function) = error("unknown except handling code for $(f).")
 
-macro DIO_MakePyFastCFunc(jl_func, args_ptr, n, narg::Int)
+@PyDLL_API DIO_MakePyFastCFunc begin
+    PyErr_SetString = PySym(:PyErr_SetString)
+    PyExc_ValueError = PySym(PyPtr, :PyExc_ValueError)    
+end
+
+function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_ptr), @nospecialize(n), narg::Int)
     error_string = "expect $(narg) arguments, while got "
-    error_string = :($error_string * string($n) * ".")
+    error_string = :("$($error_string)$(n).")
 
     call_jl_func = Expr(:call, jl_func)
+
     for i = 1:narg
         push!(call_jl_func.args, :(unsafe_load($args_ptr, $i)))
     end
-    
+
+    PyErr_SetString = apis.PyErr_SetString
+    PyExc_ValueError = apis.PyExc_ValueError
+
     a = quote
         if $n != $narg
-            PyErr_SetString(PyExc_ValueError, Base.unsafe_convert(Cstring, $error_string))
+            $PyErr_SetString($PyExc_ValueError, Base.unsafe_convert(Cstring, $error_string))
             DIO_ExceptCode($jl_func)
         else
             $call_jl_func
         end
     end
     esc(a)
+end
+
+macro DIO_MakePyFastCFunc(jl_func, args_ptr, n, narg::Int)
+    # the first argument(`apis`) of the exported api function is omitted.
+    __module__.eval(Expr(:call, :DIO_MakePyFastCFunc, jl_func, args_ptr, n, narg))
 end
 

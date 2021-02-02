@@ -76,6 +76,7 @@ macro setup(path::String)
             $__source__
             const PyDLL = $Libdl.dlopen($path)
             const $(esc(:PyDLL)) = PyDLL
+
             PySym(t, sym::Symbol) = reinterpret(t, $Libdl.dlsym(PyDLL, sym))
             PySym(sym::Symbol) = $Libdl.dlsym(PyDLL, sym)
             const $(esc(:PySym)) = PySym

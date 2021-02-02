@@ -2,7 +2,7 @@ export Py_TYPE, Py_INCREF
 function Py_INCREF(o::Ptr{PyObject})
     p = @pacc o.ob_refcnt :: Py_ssize_t
     i = unsafe_load(p)
-    Base.pointerset(p, i + 1, 1, 1)
+    unsafe_store!(p, i + 1)
     nothing
 end
 
