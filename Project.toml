@@ -1,13 +1,19 @@
-name = "dio"
+name = "DIO"
 uuid = "8016d6df-ef28-4dce-9347-78e67e45b845"
 authors = ["thautwarm <twshere@outlook.com> and contributors"]
 version = "0.1.0"
 
-[extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+[deps]
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+MLStyle = "d8e11817-5142-5d16-987a-aa16d5891078"
+Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
 
 [compat]
+MLStyle = "0.4.6"
 julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test"]
