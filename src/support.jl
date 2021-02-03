@@ -54,7 +54,7 @@ macro DIO_ChkExc(ex::Expr)
             :if,
             :($call === DIO_ExceptCode($f_sym)),
             :(@goto except),
-            call))
+            Expr(:call, :DIO_IdentityOrNone, call)))
 
     return esc(ret)
 end
@@ -103,7 +103,7 @@ macro DIO_ChkExcAndDecRefSubCall(ex::Expr)
             :if,
             :($call === DIO_ExceptCode($f_sym)),
             :(@goto except),
-            call))
+            Expr(:call, :DIO_IdentityOrNone, call)))
 
     return esc(ret)
 end
@@ -158,3 +158,12 @@ function PyCFunction_New(apis, cfuncptr::Ptr{Nothing}, UNUSED::PyPtr)
     @ccall $(apis.PyCFunction_NewEx)(cfuncptr::Ptr{Nothing}, UNUSED::PyPtr, Py_NULL::PyPtr)::PyPtr
 end
 DIO_ExceptCode(::typeof(PyCFunction_New)) = Py_NULL
+
+@RequiredPyAPI DIO_IdentityOrNone
+
+DIO_IdentityOrNone(apis, o::PyPtr) = o
+DIO_IdentityOrNone(apis, _) = begin
+    none = apis.PyO.None
+    Py_INCREF(none)
+    none
+end
