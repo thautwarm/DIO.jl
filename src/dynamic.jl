@@ -3,7 +3,13 @@ import Base: sigatomic_begin, sigatomic_end
 const PY_VECTORCALL_ARGUMENTS_OFFSET = Csize_t(1) << Csize_t(8 * sizeof(Csize_t) - 1)
 
 @PyAPISetup begin
-    PyObject_VectorcallDict = PySym(:PyObject_VectorcallDict)
+    PyObject_VectorcallDict =
+        @static if PyO.PY_VERSION >= (3, 9)
+            PySym(:PyObject_VectorcallDict)
+        else
+            PySym(:PyObject_CallFunctionObjArgs)
+        end
+    HasVectorcall = PyO.PY_VERSION >= (3, 9)
     PyExc_TypeError = PySym(PyPtr, :PyExc_TypeError)
 end
 @RequiredPyAPI Py_CallFunction
@@ -19,20 +25,33 @@ end
     set_args = [:(unsafe_store!(smallstack, args[$i], $i)) for i=1:N]
     # precompute argsf
     argsf = N | PY_VECTORCALL_ARGUMENTS_OFFSET
+    argtypes = [:PyPtr for i=1:N+1]
     @q begin
-        static_array = $Addr[$(zeros(Addr, STACK_LENGTH)...)]
-        smallstack = reinterpret(Ptr{PyPtr}, pointer(static_array))
-        $(set_args...)
-        sigatomic_begin()
-        GC.@preserve static_array begin
-            r = ccall(
+        @static if apis.HasVectorcall
+            static_array = $Addr[$(zeros(Addr, STACK_LENGTH)...)]
+            smallstack = reinterpret(Ptr{PyPtr}, pointer(static_array))
+            $(set_args...)
+            sigatomic_begin()
+            GC.@preserve static_array begin
+                r = ccall(
+                    apis.PyObject_VectorcallDict,
+                    PyPtr,
+                    (PyPtr, Ptr{PyPtr}, Csize_t, PyPtr),
+                    f,      smallstack, $argsf , Py_NULL)
+            end
+            sigatomic_end()
+            r
+        else
+            sigatomic_begin()
+            ccall(
+                # PyObject_CallFunctionObjArgs
                 apis.PyObject_VectorcallDict,
                 PyPtr,
-                (PyPtr, Ptr{PyPtr}, Csize_t, PyPtr),
-                f,      smallstack, $argsf , Py_NULL)
+                ($argtypes... , ),
+                args..., Py_NULL
+            )
+            sigatomic_end()
         end
-        sigatomic_end()
-        r
     end
 end
 DIO_ExceptCode(::typeof(Py_CallFunction)) = Py_NULL

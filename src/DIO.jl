@@ -67,6 +67,7 @@ function _PyAPISetup(define::Expr)
 end
 
 Parameters.@with_kw struct PyOType
+    PY_VERSION :: Tuple{Int, Int, Int, String, Int}
     bool::PyPtr
     int :: PyPtr
     float :: PyPtr
