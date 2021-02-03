@@ -6,11 +6,17 @@ export @DIO_Return
 struct DIO_UndefType end
 const DIO_Undef = DIO_UndefType()
 
-function DIO_DecRef(::DIO_UndefType) end
-DIO_DecRef(o::PyPtr) = Py_DECREF(o)
+@inline function DIO_DecRef(::DIO_UndefType) end
+@inline function DIO_DecRef(o::PyPtr)
+    Py_DECREF(o)
+    o
+end
 
-function DIO_IncRef(::DIO_UndefType) end
-DIO_InccRef(o::PyPtr) = Py_INCREF(o)
+@inline function DIO_IncRef(::DIO_UndefType) end
+@inline function DIO_IncRef(o::PyPtr)
+    Py_INCREF(o)
+    o    
+end
 
 const PyConstants = Set{Addr}()
 function DIO_Obj(addr::Addr)
@@ -133,16 +139,8 @@ function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_pt
 end
 
 macro DIO_MakePyFastCFunc(jl_func, args_ptr, n, narg::Int)
-    # the first argument(`apis`) of the exported api function is omitted.
-    esc(__module__.eval(
-        Expr(
-            :call,
-            __module__.DIO_MakePyFastCFunc,
-            QuoteNode(jl_func),
-            QuoteNode(args_ptr),
-            QuoteNode(n),
-            narg
-    )))
+    # the first argument(`apis`) of the exported api function is omitted.    
+    esc(__module__.DIO_MakePyFastCFunc(jl_func, args_ptr, n, narg))
 end
 
 macro DIO_Return(ex)

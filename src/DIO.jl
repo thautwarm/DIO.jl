@@ -2,6 +2,7 @@ module DIO
 using MLStyle
 import Libdl
 import Parameters
+DEBUG = false
 export @RequiredPyAPI, @PyAPISetup, PyOType
 
 include("juliainfo.jl")
@@ -66,6 +67,7 @@ function _PyAPISetup(define::Expr)
 end
 
 Parameters.@with_kw struct PyOType
+    bool::PyPtr
     int :: PyPtr
     float :: PyPtr
     str :: PyPtr
@@ -106,11 +108,12 @@ macro setup(path::String)
 
             # declare the type of 'PyAPI_Struct'
             struct PyAPI_Type
+                PyO :: PyOType
                 $(PyAPI_Fields...)
             end
 
             # construct 'PyAPI_Struct'
-            const PyAPI_Struct = PyAPI_Type(PyAPI_Args...)
+            const PyAPI_Struct = PyAPI_Type(PyO, PyAPI_Args...)
             PyAPI_Args = nothing
 
             $( [:($each(args...) = $(@__MODULE__).$each(PyAPI_Struct, args...))

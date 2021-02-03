@@ -8,8 +8,14 @@ const PY_VECTORCALL_ARGUMENTS_OFFSET = Csize_t(1) << Csize_t(8 * sizeof(Csize_t)
 end
 @RequiredPyAPI Py_CallFunction
 @generated function Py_CallFunction(apis, f::PyPtr, args::Vararg{PyPtr, N}) where N
-    # this is chosen for fitting LLVM optimisations
-    STACK_LENGTH = 4 * ceil(Int, N / 4)
+    # this is chosen for fitting LLVM optimisations about stack allocation
+    STACK_LENGTH =
+        @match N begin
+            0 => 0
+            1 => 1
+            2 => 2
+            _ => 4 * ceil(Int, N / 4)
+        end
     set_args = [:(unsafe_store!(smallstack, args[$i], $i)) for i=1:N]
     # precompute argsf
     argsf = N | PY_VECTORCALL_ARGUMENTS_OFFSET
@@ -32,6 +38,37 @@ end
 DIO_ExceptCode(::typeof(Py_CallFunction)) = Py_NULL
 
 @PyAPISetup begin
-    Py_IntAsNumberPtr = unsafe_load(reinterpret(Ptr{PyTypeObject}, PyO.int)).tp_as_number
-    Py_IntAddIntFnPtr = unsafe_load(Py_IntAsNumberPtr).nb_add
+    Py_IntAsNumberPtr =unsafe_load(reinterpret(Ptr{PyTypeObject}, PyO.int)).tp_as_number
+    Py_IntPowIntPtr = unsafe_load(Py_IntAsNumberPtr).nb_power
+    Py_IntAddIntPtr = unsafe_load(Py_IntAsNumberPtr).nb_add
+    PyLong_AsDouble = PySym(:PyLong_AsDouble)
+    PyFloat_FromDouble = PySym(:PyFloat_FromDouble)
 end
+@RequiredPyAPI Py_IntPowInt
+function Py_IntPowInt(apis, l :: PyPtr, r :: PyPtr)
+    apis.Py_IntPowIntPtr(l, r, apis.PyO.None)
+end
+DIO_ExceptCode(::typeof(Py_IntPowInt)) = Py_NULL
+
+@RequiredPyAPI Py_IntAddInt
+function Py_IntAddInt(apis, l :: PyPtr, r :: PyPtr)
+    apis.Py_IntAddIntPtr(l, r)
+end
+DIO_ExceptCode(::typeof(Py_IntAddInt)) = Py_NULL
+
+@RequiredPyAPI Py_CallBoolIfNecessary
+function Py_CallBoolIfNecessary(apis, o::PyPtr)
+    if Py_TYPE(o) === apis.PyO.bool
+        return o
+    else
+        return Py_CallFunction(apis, apis.PyO.bool, o)
+    end
+end
+DIO_ExceptCode(::typeof(Py_CallBoolIfNecessary)) = Py_NULL
+
+@RequiredPyAPI Py_IntSqrt
+function Py_IntSqrt(apis, o::PyPtr)
+    d =  ccall(apis.PyLong_AsDouble, Cdouble, (PyPtr, ),  o)
+    ccall(apis.PyFloat_FromDouble, PyPtr, (Cdouble, ), sqrt(d))
+end
+DIO_ExceptCode(::typeof(Py_IntSqrt)) = Py_NULL

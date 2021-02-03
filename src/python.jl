@@ -59,6 +59,7 @@ end
 function (f::ternaryfunc)(o1::PyPtr, o2::PyPtr, o3::PyPtr)
     ccall(f.unbox, PyPtr, (PyPtr, PyPtr, PyPtr), o1, o2, o3)
 end
+DIO_ExceptCode(::ternaryfunc) = Py_NULL
 
 struct PyNumberMethods
     nb_add::binaryfunc
@@ -109,9 +110,9 @@ end
 
 mutable struct PyTypeObject
     # PyObject_HEAD (for non-Py_TRACE_REFS build):
-    ob_refcnt::Int
+    ob_refcnt::Py_ssize_t
     ob_type::PyPtr
-    ob_size::Int # PyObject_VAR_HEAD
+    ob_size::Py_ssize_t # PyObject_VAR_HEAD
 
     # PyTypeObject fields:
     tp_name::Ptr{UInt8} # required, should be in format "<module>.<name>"
@@ -121,10 +122,10 @@ mutable struct PyTypeObject
     tp_itemsize::Int
 
     tp_dealloc::Ptr{Cvoid}
-    tp_print::Ptr{Cvoid}
+    tp_vectorcall_offset :: Addr
     tp_getattr::Ptr{Cvoid}
     tp_setattr::Ptr{Cvoid}
-    tp_compare::Ptr{Cvoid}
+    tp_as_async::Ptr{Cvoid}
     tp_repr::Ptr{Cvoid}
 
     tp_as_number::Ptr{PyNumberMethods}
