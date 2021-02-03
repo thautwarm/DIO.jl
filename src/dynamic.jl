@@ -76,6 +76,6 @@ DIO_ExceptCode(::typeof(Py_IntSqrt)) = Py_NULL
 
 @RequiredPyAPI PyList_Append
 function PyList_Append(apis, lst::Ptr, elt::PyPtr)
-    ccall(apis.PyList_Append, Cint, (PyPtr, PyPtr), lst, elt) === Cint(-1)
+    ccall(apis.PyList_Append, Cint, (PyPtr, PyPtr), lst, elt)
 end
 DIO_ExceptCode(::typeof(PyList_Append)) = Cint(-1)
