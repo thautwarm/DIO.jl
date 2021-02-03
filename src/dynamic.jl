@@ -1,11 +1,12 @@
 import Base: sigatomic_begin, sigatomic_end
 
 const PY_VECTORCALL_ARGUMENTS_OFFSET = Csize_t(1) << Csize_t(8 * sizeof(Csize_t) - 1)
-@PyDLL_API Py_CallFunction begin
+
+@PyAPISetup begin
     PyObject_VectorcallDict = PySym(:PyObject_VectorcallDict)
     PyExc_TypeError = PySym(PyPtr, :PyExc_TypeError)
 end
-
+@RequiredPyAPI Py_CallFunction
 @generated function Py_CallFunction(apis, f::PyPtr, args::Vararg{PyPtr, N}) where N
     # this is chosen for fitting LLVM optimisations
     STACK_LENGTH = 4 * ceil(Int, N / 4)
@@ -28,11 +29,9 @@ end
         r
     end
 end
-
 DIO_ExceptCode(::typeof(Py_CallFunction)) = Py_NULL
 
-@PyDLL_API begin
-    Py_IntTypePtr = reinterpret(Ptr{PyTypeObject}, (!PyO.int).ob_type)
-    Py_IntAsNumberPtr = (!Py_IntTypePtr).tp_as_number
-    Py_IntAddIntFnPtr = (!Py_IntAsNumberPtr).nb_add
+@PyAPISetup begin
+    Py_IntAsNumberPtr = unsafe_load(reinterpret(Ptr{PyTypeObject}, PyO.int)).tp_as_number
+    Py_IntAddIntFnPtr = unsafe_load(Py_IntAsNumberPtr).nb_add
 end

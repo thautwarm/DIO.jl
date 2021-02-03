@@ -12,7 +12,6 @@ DIO_DecRef(o::PyPtr) = Py_DECREF(o)
 function DIO_IncRef(::DIO_UndefType) end
 DIO_InccRef(o::PyPtr) = Py_INCREF(o)
 
-
 const PyConstants = Set{Addr}()
 function DIO_Obj(addr::Addr)
     o = reinterpret(PyPtr, addr)
@@ -103,14 +102,13 @@ macro DIO_ChkExcAndDecRefSubCall(ex::Expr)
     return esc(ret)
 end
 
-
 DIO_ExceptCode(f::Function) = error("unknown except handling code for $(f).")
 
-@PyDLL_API DIO_MakePyFastCFunc begin
+@PyAPISetup begin
     PyErr_SetString = PySym(:PyErr_SetString)
     PyExc_ValueError = PySym(PyPtr, :PyExc_ValueError)
 end
-
+@RequiredPyAPI DIO_MakePyFastCFunc
 function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_ptr), @nospecialize(n), narg::Int)
     error_string = "expect $(narg) arguments, while got "
     error_string = :("$($error_string)$(n).")
@@ -137,12 +135,13 @@ end
 macro DIO_MakePyFastCFunc(jl_func, args_ptr, n, narg::Int)
     # the first argument(`apis`) of the exported api function is omitted.
     esc(__module__.eval(
-        Expr(:call,
-        :DIO_MakePyFastCFunc,
-        QuoteNode(jl_func),
-        QuoteNode(args_ptr),
-        QuoteNode(n),
-        narg
+        Expr(
+            :call,
+            __module__.DIO_MakePyFastCFunc,
+            QuoteNode(jl_func),
+            QuoteNode(args_ptr),
+            QuoteNode(n),
+            narg
     )))
 end
 
@@ -153,11 +152,11 @@ macro DIO_Return(ex)
     end)
 end
 
-
-@PyDLL_API PyCFunction_New begin
+@PyAPISetup begin
     PyCFunction_NewEx = PySym(:PyCFunction_NewEx)
 end
-
+@RequiredPyAPI PyCFunction_New
 function PyCFunction_New(apis, cfuncptr::Ptr{Nothing}, UNUSED::PyPtr)
     @ccall $(apis.PyCFunction_NewEx)(cfuncptr::Ptr{Nothing}, UNUSED::PyPtr, Py_NULL::PyPtr)::PyPtr
 end
+DIO_ExceptCode(::typeof(PyCFunction_New)) = Py_NULL

@@ -2,89 +2,70 @@ module DIO
 using MLStyle
 import Libdl
 import Parameters
-export @PyDLL_API, PyOType
+export @RequiredPyAPI, @PyAPISetup, PyOType
 
 include("juliainfo.jl")
 include("python.jl")
 include("utils.jl")
 include("static.jl")
 
-const Setup_API_Symbols = Symbol[]
-const PyDLL_Struct_FieldSymbols = Symbol[]
-const PyDLL_Struct_Fields = Any[]
-const PyDLL_Struct_Construct = Expr[]
+const Setup_AutoBound_Symbols = Symbol[]
+const PyAPI_FieldSymbols = Symbol[]
+const PyAPI_FieldTypes = Symbol[]
+const PyAPI_Fields = Any[]
+const PyAPI_Construct = Expr[]
 
 """
-Wrap the builtin function which required Python DLL.
-
-Before loading Python DLL:
-
+Automatically bound the loaded Python APIs(`PyAPI_Struct`) to the first argument,
+and enter a function `MyFunc(...) = <callee module>.MyFunc(PyAPI_Struct, ...)` 
+to the caller module:
     ```
-    function MyFunc(apis, f::PyPtr)
-        o = apis.PyObject_CallNoArgs(f)
-        return o
+    @PyAPISetup begin
+        PyObject_Call = PySym(:PyObject_Call)
     end
-    DIO_ExceptCode(::typeof(MyFunc)) = Py_NULL
-
-    @PyDLL_API MyFunc begin
-        PyObject_CallNoArgs = PySym(:PyObject_CallNoArgs)
-    end 
-    ```
-
-After loading Python DLL in **another** module,
-    ```
-    DIO.@setup
-    MyFunc(some_py_obj) # first parameter is automatically filled
+    @RequiredPyAPI MyFunc
+    function MyFunc(apis, ...)
+        ccall(apis.PyObject_Call, ...)
+    end
     ```
 """
-macro PyDLL_API(api::Symbol, define::Expr)
-    _PyDLL_API(api, define)
+macro RequiredPyAPI(sym::Symbol)
+    _RequiredPyAPI(sym)
+end
+function _RequiredPyAPI(sym::Symbol)
+    push!(Setup_AutoBound_Symbols, sym)
 end
 
-macro PyDLL_API(define::Expr)
-    _PyDLL_API(define)
+macro PyAPISetup(define::Expr)
+    _PyAPISetup(define)
 end
 
-macro PyDLL_API(api::Symbol)
-    push!(Setup_API_Symbols, api)
-end
-
-function _PyDLL_API(api::Symbol, define::Expr)
-    _PyDLL_API(define)
-    push!(Setup_API_Symbols, api)
-end
-
-function _PyDLL_API(define::Expr)
+function _PyAPISetup(define::Expr)
     Meta.isexpr(define, :block) ||
-        error("malformed use of @PyDLL_API: require a block of assignments but got $(define)")
-    
+        error("malformed use of @PyAPISetup require a block of assignments but got $(define).")
+
     for each in define.args
         @switch each begin
-        @case ::LineNumberNode 
+        @case ::LineNumberNode
             nothing
         @case :($(a :: Symbol) = $expr)
-            if a in PyDLL_Struct_FieldSymbols
+            if a in PyAPI_FieldSymbols
                 error("duplicate symbol reference from Python DLL: $a")
             end
             t = Symbol("_Type_Of_$a")
-            tmp = gensym(a)
-            push!(PyDLL_Struct_FieldSymbols, a)
-            push!(PyDLL_Struct_Fields, :($a :: $t))
-            push!(PyDLL_Struct_Construct,
-                    @q begin
-                        $tmp = $expr
-                        $t = typeof($tmp)
-                        $tmp
-                    end)
+            push!(PyAPI_FieldTypes, t)
+            push!(PyAPI_FieldSymbols, a)    
+            push!(PyAPI_Fields, :($a :: $t))
+            push!(PyAPI_Construct, :($a = $expr))
             nothing
         @case _
             # TODO
-            error("malformed use of @PyDLL_API: expect assignments but got:  $each")
+            error("malformed use of @PyAPISetup: expect assignments but got: $each")
         end
     end
 end
 
-@Parameters.with_kw struct PyOType
+Parameters.@with_kw struct PyOType
     int :: PyPtr
     float :: PyPtr
     str :: PyPtr
@@ -104,38 +85,50 @@ macro setup(path::String)
     if IsInitialized[]
         Base.@warn "Re-setup is not allowed. Restart your runtime and import this package again."
     else
-        r = @q begin
-            
+        py_dll_struct_cons_expr =
+            @q let $(PyAPI_Construct...)
+                ($(PyAPI_FieldSymbols...), )
+            end
+        
+        unhygienic_part1 = @q begin
             $__source__
-            const PyO = $(esc(:PyO)) # this is initialized when Python call PyO = ...
             const PyDLL = $Libdl.dlopen($path)
-            const $(esc(:PyDLL)) = PyDLL
-
             PySym(t, sym::Symbol) = reinterpret(t, $Libdl.dlsym(PyDLL, sym))
             PySym(sym::Symbol) = $Libdl.dlsym(PyDLL, sym)
-            const $(esc(:PySym)) = PySym
+        end
 
-            PyDLL_Args = $(Expr(:tuple, PyDLL_Struct_Construct...))
+        # compute all required symbols from libpython.so/dll, and other related values
+        hygienic_part = :($(esc(:PyAPI_Args)) = $py_dll_struct_cons_expr)
 
-            struct $(esc(:PyDLLType))
-                $(PyDLL_Struct_Fields...)
+        unhygienic_part2 = @q begin
+            # compute types of all required symbols and related values
+            $(Expr(:tuple, PyAPI_FieldTypes...)) =  map(typeof, PyAPI_Args)
+
+            # declare the type of 'PyAPI_Struct'
+            struct PyAPI_Type
+                $(PyAPI_Fields...)
             end
 
-            const PyDLL_Struct = $(esc(:PyDLLType))(PyDLL_Args...)
-            const $(esc(:PyDLL_Struct)) = PyDLL_Struct
-            $(
-                [:($(esc(each))(args...) = $(@__MODULE__).$each(PyDLL_Struct, args...))
-                for each in Setup_API_Symbols]...
-            )
-             $(
-                [:($(@__MODULE__).DIO_ExceptCode(::typeof($(esc(each)))) =
-                    DIO_ExceptCode($(@__MODULE__).$each))
-                for each in Setup_API_Symbols]...
-            )
+            # construct 'PyAPI_Struct'
+            const PyAPI_Struct = PyAPI_Type(PyAPI_Args...)
+            PyAPI_Args = nothing
+
+            $( [:($each(args...) = $(@__MODULE__).$each(PyAPI_Struct, args...))
+                for each in Setup_AutoBound_Symbols]...)
+            # set up exception code for API functions
+            $( [:($(@__MODULE__).DIO_ExceptCode(::typeof($each)) = DIO_ExceptCode($(@__MODULE__).$each))
+                for each in Setup_AutoBound_Symbols]...)
             $_initialize()
         end
-        # println(r)
-        r
+        
+        @q begin
+            # 'PyO' is computed when starting Julia from Python
+            PyO = $(esc(:PyO))
+            $(esc(unhygienic_part1))
+            PySym = $(esc(:PySym))
+            $hygienic_part
+            $(esc(unhygienic_part2))
+        end
     end
 end
 
