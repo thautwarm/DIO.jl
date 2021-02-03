@@ -1,7 +1,8 @@
 module DIO
 using MLStyle
 import Libdl
-export @PyDLL_API
+import Parameters
+export @PyDLL_API, PyOType
 
 include("juliainfo.jl")
 include("python.jl")
@@ -37,9 +38,26 @@ After loading Python DLL in **another** module,
     ```
 """
 macro PyDLL_API(api::Symbol, define::Expr)
+    _PyDLL_API(api, define)
+end
+
+macro PyDLL_API(define::Expr)
+    _PyDLL_API(define)
+end
+
+macro PyDLL_API(api::Symbol)
+    push!(Setup_API_Symbols, api)
+end
+
+function _PyDLL_API(api::Symbol, define::Expr)
+    _PyDLL_API(define)
+    push!(Setup_API_Symbols, api)
+end
+
+function _PyDLL_API(define::Expr)
     Meta.isexpr(define, :block) ||
         error("malformed use of @PyDLL_API: require a block of assignments but got $(define)")
-    push!(Setup_API_Symbols, api)
+    
     for each in define.args
         @switch each begin
         @case ::LineNumberNode 
@@ -66,6 +84,20 @@ macro PyDLL_API(api::Symbol, define::Expr)
     end
 end
 
+@Parameters.with_kw struct PyOType
+    int :: PyPtr
+    float :: PyPtr
+    str :: PyPtr
+    type :: PyPtr
+    None :: PyPtr
+    complex :: PyPtr
+    tuple :: PyPtr
+    list :: PyPtr
+    set :: PyPtr
+    dict :: PyPtr
+    import_module :: PyPtr
+end
+
 const IsInitialized = Ref(false)
 _initialize() = IsInitialized[] = true
 macro setup(path::String)
@@ -73,7 +105,9 @@ macro setup(path::String)
         Base.@warn "Re-setup is not allowed. Restart your runtime and import this package again."
     else
         r = @q begin
+            
             $__source__
+            const PyO = $(esc(:PyO)) # this is initialized when Python call PyO = ...
             const PyDLL = $Libdl.dlopen($path)
             const $(esc(:PyDLL)) = PyDLL
 
@@ -93,9 +127,14 @@ macro setup(path::String)
                 [:($(esc(each))(args...) = $(@__MODULE__).$each(PyDLL_Struct, args...))
                 for each in Setup_API_Symbols]...
             )
+             $(
+                [:($(@__MODULE__).DIO_ExceptCode(::typeof($(esc(each)))) =
+                    DIO_ExceptCode($(@__MODULE__).$each))
+                for each in Setup_API_Symbols]...
+            )
             $_initialize()
         end
-        println(r)
+        # println(r)
         r
     end
 end

@@ -1,0 +1,2 @@
+#!/usr/bin/env julia
+using Pkg; Pkg.rm("DIO"); Pkg.develop(path=".")

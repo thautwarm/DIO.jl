@@ -1,4 +1,6 @@
 export PyPtr, PyObject, Py_NULL, METH_O, METH_NOARGS, METH_FASTCALL
+export Py_ssize_t, Addr
+export PyMethodDef
 
 const Py_ssize_t = Cssize_t
 const Addr = UInt64
@@ -9,6 +11,7 @@ struct PyObject
 end
 
 const PyPtr = Ptr{PyObject}
+const Py_NULL = reinterpret(PyPtr, C_NULL)
 
 const METH_VARARGS = 0x0001
 const METH_KEYWORDS = 0x0002
@@ -16,7 +19,7 @@ const METH_NOARGS = 0x0004
 const METH_O = 0x0008
 const METH_FASTCALL = 0x0080
 
-struct PyMethodDef
+mutable struct PyMethodDef
     ml_name::Cstring
     ml_meth::Ptr{Nothing}
     ml_flags::Cint
@@ -29,6 +32,71 @@ struct PyGetSetDef
     set::Ptr{Cvoid} # may be NULL for read-only members
     doc::Ptr{UInt8} # may be NULL
     closure::Ptr{Cvoid} # pass-through thunk, may be NULL
+end
+
+# (o, o) -> p
+struct binaryfunc
+    unbox::Ptr{Nothing}
+end
+function (f::binaryfunc)(o1::PyPtr, o2::PyPtr)
+    ccall(f.unbox, PyPtr, (PyPtr, PyPtr), o1, o2)
+end
+DIO_ExceptCode(::binaryfunc) = Py_NULL
+
+# (o) -> p
+struct unaryfunc
+    unbox::Ptr{Nothing}
+end
+function (f::unaryfunc)(o)
+    ccall(f.unbox, PyPtr, (PyPtr,), o)
+end
+DIO_ExceptCode(::unaryfunc) = Py_NULL
+
+# (o, o, o) -> p
+struct ternaryfunc
+    unbox::Ptr{Nothing}
+end
+function (f::ternaryfunc)(o1::PyPtr, o2::PyPtr, o3::PyPtr)
+    ccall(f.unbox, PyPtr, (PyPtr, PyPtr, PyPtr), o1, o2, o3)
+end
+
+struct PyNumberMethods
+    nb_add::binaryfunc
+    nb_subtract::binaryfunc
+    nb_multiply::binaryfunc
+    nb_remainder::binaryfunc
+    nb_divmod::binaryfunc
+    nb_power::ternaryfunc
+    nb_negative::unaryfunc
+    nb_positive::unaryfunc
+    nb_absolute::unaryfunc
+    nb_bool::Ptr{Nothing}
+    nb_invert::unaryfunc
+    nb_lshift::binaryfunc
+    nb_rshift::binaryfunc
+    nb_and::binaryfunc
+    nb_xor::binaryfunc
+    nb_or::binaryfunc
+    nb_int::unaryfunc
+    nb_reserved::Ptr{Nothing}
+    nb_float::unaryfunc
+    nb_inplace_add::binaryfunc
+    nb_inplace_subtract::binaryfunc
+    nb_inplace_multiply::binaryfunc
+    nb_inplace_remainder::binaryfunc
+    nb_inplace_power::ternaryfunc
+    nb_inplace_lshift::binaryfunc
+    nb_inplace_rshift::binaryfunc
+    nb_inplace_and::binaryfunc
+    nb_inplace_xor::binaryfunc
+    nb_inplace_or::binaryfunc
+    nb_floor_divide::binaryfunc
+    nb_true_divide::binaryfunc
+    nb_inplace_floor_divide::binaryfunc
+    nb_inplace_true_divide::binaryfunc
+    nb_index::unaryfunc
+    nb_matrix_multiply::binaryfunc
+    nb_inplace_matrix_multiply::binaryfunc
 end
 
 struct PyMemberDef
@@ -52,14 +120,14 @@ mutable struct PyTypeObject
     tp_basicsize::Int # required, = sizeof(instance)
     tp_itemsize::Int
 
-    tp_dealloc:: Ptr{Cvoid}
+    tp_dealloc::Ptr{Cvoid}
     tp_print::Ptr{Cvoid}
     tp_getattr::Ptr{Cvoid}
     tp_setattr::Ptr{Cvoid}
     tp_compare::Ptr{Cvoid}
     tp_repr::Ptr{Cvoid}
 
-    tp_as_number::Ptr{Cvoid}
+    tp_as_number::Ptr{PyNumberMethods}
     tp_as_sequence::Ptr{Cvoid}
     tp_as_mapping::Ptr{Cvoid}
 
@@ -121,4 +189,3 @@ mutable struct PyTypeObject
     tp_next::Ptr{Cvoid}
 end
 
-const Py_NULL = reinterpret(PyPtr, C_NULL)

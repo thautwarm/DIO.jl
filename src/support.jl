@@ -1,6 +1,7 @@
-export @DIO_Obj, DIO_IncRef, DIO_DecRef, DIO_Undef
-export DIO_ChkExc, DIO_ChkExcAndDecRefSubCall, DIO_ExceptCode
+export @DIO_Obj, DIO_IncRef, DIO_DecRef, DIO_Undef, DIO_ExceptCode
+export @DIO_ChkExc, @DIO_ChkExcAndDecRefSubCall
 export @DIO_MakePyFastCFunc
+export @DIO_Return
 
 struct DIO_UndefType end
 const DIO_Undef = DIO_UndefType()
@@ -18,7 +19,7 @@ function DIO_Obj(addr::Addr)
     addr in PyConstants || begin
         push!(PyConstants, addr)
         Py_INCREF(o)
-    end 
+    end
     return o
 end
 
@@ -48,13 +49,13 @@ macro DIO_ChkExc(ex::Expr)
             :if,
             :($call === DIO_ExceptCode($f_sym)),
             :(@goto except),
-            call))    
-    
+            call))
+
     return esc(ret)
 end
 
 macro DIO_ChkExcAndDecRefSubCall(ex::Expr)
-    tmps_to_decref = Symbol[]    
+    tmps_to_decref = Symbol[]
     f_sym = nothing
 
     @switch ex begin
@@ -98,7 +99,7 @@ macro DIO_ChkExcAndDecRefSubCall(ex::Expr)
             :($call === DIO_ExceptCode($f_sym)),
             :(@goto except),
             call))
-    
+
     return esc(ret)
 end
 
@@ -107,7 +108,7 @@ DIO_ExceptCode(f::Function) = error("unknown except handling code for $(f).")
 
 @PyDLL_API DIO_MakePyFastCFunc begin
     PyErr_SetString = PySym(:PyErr_SetString)
-    PyExc_ValueError = PySym(PyPtr, :PyExc_ValueError)    
+    PyExc_ValueError = PySym(PyPtr, :PyExc_ValueError)
 end
 
 function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_ptr), @nospecialize(n), narg::Int)
@@ -123,7 +124,7 @@ function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_pt
     PyErr_SetString = apis.PyErr_SetString
     PyExc_ValueError = apis.PyExc_ValueError
 
-    a = quote
+    quote
         if $n != $narg
             $PyErr_SetString($PyExc_ValueError, Base.unsafe_convert(Cstring, $error_string))
             DIO_ExceptCode($jl_func)
@@ -131,11 +132,32 @@ function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_pt
             $call_jl_func
         end
     end
-    esc(a)
 end
 
 macro DIO_MakePyFastCFunc(jl_func, args_ptr, n, narg::Int)
     # the first argument(`apis`) of the exported api function is omitted.
-    __module__.eval(Expr(:call, :DIO_MakePyFastCFunc, jl_func, args_ptr, n, narg))
+    esc(__module__.eval(
+        Expr(:call,
+        :DIO_MakePyFastCFunc,
+        QuoteNode(jl_func),
+        QuoteNode(args_ptr),
+        QuoteNode(n),
+        narg
+    )))
 end
 
+macro DIO_Return(ex)
+    esc(@q begin
+        DIO_Return = $ex
+        @goto ret
+    end)
+end
+
+
+@PyDLL_API PyCFunction_New begin
+    PyCFunction_NewEx = PySym(:PyCFunction_NewEx)
+end
+
+function PyCFunction_New(apis, cfuncptr::Ptr{Nothing}, UNUSED::PyPtr)
+    @ccall $(apis.PyCFunction_NewEx)(cfuncptr::Ptr{Nothing}, UNUSED::PyPtr, Py_NULL::PyPtr)::PyPtr
+end
