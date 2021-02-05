@@ -60,10 +60,53 @@ DIO_ExceptCode(::typeof(Py_CallFunction)) = Py_NULL
     PyErr_Print = PySym(:PyErr_Print)
     PyErr_Occurred = PySym(:PyErr_Occurred)
     _PyList_GetItem = PySym(:PyList_GetItem)
+    _PyList_SetItem = PySym(:PyList_SetItem)
     PyLong_AsSsize_t = PySym(:PyLong_AsSsize_t)
     PyObject_SetItem = PySym(:PyObject_SetItem)
     PyObject_RichCompare = PySym(:PyObject_RichCompare)
+    _PyList_New = PySym(:PyList_New)
+    _PySequence_Length = PySym(:PySequence_Length)
+    PyLong_FromSsize_t = PySym(:PyLong_FromSsize_t)
 end
+
+@exportapi PySequence_Length
+@autoapi _PySequence_Length(PyPtr)::Py_ssize_t
+@autoapi PyLong_FromSsize_t(Py_ssize_t)::PyPtr
+function PySequence_Length(apis, o::PyPtr)::PyPtr
+    size = _PySequence_Length(apis, o)
+    if size == -1
+        Py_NULL
+    else
+        PyLong_FromSsize_t(apis, size)
+    end
+end
+DIO_ExceptCode(::typeof(PySequence_Length)) = Py_NULL
+
+@exportapi Py_AddressCompare
+function Py_AddressCompare(apis, l::PyPtr, r::PyPtr)::PyPtr
+    o = l === r ? apis.PyO.True : apis.PyO.False
+    Py_INCREF(o)
+    o
+end
+DIO_ExceptCode(::typeof(Py_AddressCompare)) = nothing
+
+@exportapi PyList_Construct
+@autoapi _PyList_SetItem(PyPtr, Py_ssize_t, PyPtr)::Cint
+@autoapi _PyList_New(Py_ssize_t)::PyPtr != Py_NULL
+function PyList_Construct(apis, args::Vararg{PyPtr,N}) where N
+    lst = _PyList_New(apis, N)
+    if lst === Py_NULL
+        return lst
+    end
+    for i = 1:N
+        o = args[i]
+        Py_INCREF(o)
+        # inbounds, no need to check the errocode
+        _PyList_SetItem(apis, lst, Py_ssize_t(i - 1), o) 
+    end
+    return lst
+end
+DIO_ExceptCode(::typeof(PyList_Construct)) = Py_NULL
 
 @exportapi PyObject_RichCompare
 @autoapi PyObject_RichCompare(PyPtr, PyPtr, Cint)::PyPtr != Py_NULL
