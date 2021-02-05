@@ -67,7 +67,22 @@ DIO_ExceptCode(::typeof(Py_CallFunction)) = Py_NULL
     _PyList_New = PySym(:PyList_New)
     _PySequence_Length = PySym(:PySequence_Length)
     PyLong_FromSsize_t = PySym(:PyLong_FromSsize_t)
+    _PySequence_GetItem = PySym(:PySequence_GetItem)
+    _PyBytes_Join = PySym(:_PyBytes_Join)
 end
+
+@exportapi _PyBytes_Join
+@autoapi _PyBytes_Join(PyPtr, PyPtr)::PyPtr != Py_NULL
+@exportapi PySequence_GetItem
+@autoapi _PySequence_GetItem(PyPtr, Py_ssize_t)::PyPtr
+function PySequence_GetItem(apis, seq::PyPtr, item::PyPtr)::PyPtr
+    i = PyLong_AsSsize_t(apis, item)
+    if i == -1 && PyErr_Occurred(apis) != Py_NULL
+        return Py_NULL
+    end
+    _PySequence_GetItem(apis, seq, i)
+end
+DIO_ExceptCode(::typeof(PySequence_GetItem)) = Py_NULL
 
 @exportapi PySequence_Length
 @autoapi _PySequence_Length(PyPtr)::Py_ssize_t
