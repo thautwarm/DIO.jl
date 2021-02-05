@@ -1,7 +1,7 @@
 export @DIO_Obj, DIO_IncRef, DIO_DecRef, DIO_Undef, DIO_ExceptCode
 export @DIO_ChkExc, @DIO_ChkExcAndDecRefSubCall
 export @DIO_MakePyFastCFunc
-export @DIO_Return
+export @DIO_Return, @DIO_SetLineno
 
 struct DIO_UndefType end
 const DIO_Undef = DIO_UndefType()
@@ -19,7 +19,7 @@ end
 end
 
 const PyConstants = Set{Addr}()
-function DIO_Obj(addr::Addr)
+function DIO_Obj(addr::Addr)::PyPtr
     o = reinterpret(PyPtr, addr)
     addr in PyConstants || begin
         push!(PyConstants, addr)
@@ -110,11 +110,13 @@ end
 
 DIO_ExceptCode(f::Function) = error("unknown except handling code for $(f).")
 
-@PyAPISetup begin
+@apisetup begin
     PyErr_SetString = PySym(:PyErr_SetString)
     PyExc_ValueError = PySym(PyPtr, :PyExc_ValueError)
+    PyCFunction_NewEx = PySym(:PyCFunction_NewEx)
+    PyObject_Str = PySym(:PyObject_Str)
 end
-@RequiredPyAPI DIO_MakePyFastCFunc
+@exportapi DIO_MakePyFastCFunc
 function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_ptr), @nospecialize(n), narg::Int)
     error_string = "expect $(narg) arguments, while got "
     error_string = :("$($error_string)$(n).")
@@ -127,17 +129,23 @@ function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_pt
 
     PyErr_SetString = apis.PyErr_SetString
     PyExc_ValueError = apis.PyExc_ValueError
-
+    # g = gensym("ret")
     quote
         if $n != $narg
-            $PyErr_SetString($PyExc_ValueError, Base.unsafe_convert(Cstring, $error_string))
+            msg = $error_string
+            GC.@preserve msg begin
+                ccall(
+                    $PyErr_SetString,
+                    Cvoid,
+                    (PyPtr, Cstring),
+                    $PyExc_ValueError, Base.unsafe_convert(Cstring, msg))
+            end
             DIO_ExceptCode($jl_func)
         else
-            $call_jl_func
+            $call_jl_func        
         end
     end
 end
-
 macro DIO_MakePyFastCFunc(jl_func, args_ptr, n, narg::Int)
     # the first argument(`apis`) of the exported api function is omitted.    
     esc(__module__.DIO_MakePyFastCFunc(jl_func, args_ptr, n, narg))
@@ -150,20 +158,25 @@ macro DIO_Return(ex)
     end)
 end
 
-@PyAPISetup begin
-    PyCFunction_NewEx = PySym(:PyCFunction_NewEx)
-end
-@RequiredPyAPI PyCFunction_New
+@exportapi PyCFunction_NewEx
+@autoapi PyCFunction_NewEx(Ptr{Nothing}, PyPtr, PyPtr)::PyPtr
+
+@exportapi PyCFunction_New
 function PyCFunction_New(apis, cfuncptr::Ptr{Nothing}, UNUSED::PyPtr)
     @ccall $(apis.PyCFunction_NewEx)(cfuncptr::Ptr{Nothing}, UNUSED::PyPtr, Py_NULL::PyPtr)::PyPtr
 end
-DIO_ExceptCode(::typeof(PyCFunction_New)) = Py_NULL
 
-@RequiredPyAPI DIO_IdentityOrNone
-
-DIO_IdentityOrNone(apis, o::PyPtr) = o
+@exportapi DIO_IdentityOrNone
+DIO_IdentityOrNone(apis, o::PyPtr) = begin
+    # Py_INCREF(o)
+    o
+end
 DIO_IdentityOrNone(apis, _) = begin
     none = apis.PyO.None
     Py_INCREF(none)
     none
+end
+
+macro DIO_SetLineno(line::Int, filename::String)
+    LineNumberNode(line, Symbol(filename))
 end

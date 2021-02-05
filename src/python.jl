@@ -3,6 +3,7 @@ export Py_ssize_t, Addr
 export PyMethodDef
 
 const Py_ssize_t = Cssize_t
+const Py_hash_t = Py_ssize_t
 const Addr = UInt64
 
 struct PyObject
@@ -35,31 +36,35 @@ struct PyGetSetDef
 end
 
 # (o, o) -> p
-struct binaryfunc
-    unbox::Ptr{Nothing}
-end
-function (f::binaryfunc)(o1::PyPtr, o2::PyPtr)
-    ccall(f.unbox, PyPtr, (PyPtr, PyPtr), o1, o2)
-end
-DIO_ExceptCode(::binaryfunc) = Py_NULL
+# struct binaryfunc
+#     unbox::Ptr{Nothing}
+# end
+# function (f::binaryfunc)(o1::PyPtr, o2::PyPtr)
+#     ccall(f.unbox, PyPtr, (PyPtr, PyPtr), o1, o2)
+# end
+# DIO_ExceptCode(::binaryfunc) = Py_NULL
 
 # (o) -> p
-struct unaryfunc
-    unbox::Ptr{Nothing}
-end
-function (f::unaryfunc)(o)
-    ccall(f.unbox, PyPtr, (PyPtr,), o)
-end
-DIO_ExceptCode(::unaryfunc) = Py_NULL
+# struct unaryfunc
+#     unbox::Ptr{Nothing}
+# end
+# function (f::unaryfunc)(o)
+#     ccall(f.unbox, PyPtr, (PyPtr,), o)
+# end
+# DIO_ExceptCode(::unaryfunc) = Py_NULL
 
-# (o, o, o) -> p
-struct ternaryfunc
-    unbox::Ptr{Nothing}
-end
-function (f::ternaryfunc)(o1::PyPtr, o2::PyPtr, o3::PyPtr)
-    ccall(f.unbox, PyPtr, (PyPtr, PyPtr, PyPtr), o1, o2, o3)
-end
-DIO_ExceptCode(::ternaryfunc) = Py_NULL
+# # (o, o, o) -> p
+# struct ternaryfunc
+#     unbox::Ptr{Nothing}
+# end
+# function (f::ternaryfunc)(o1::PyPtr, o2::PyPtr, o3::PyPtr)
+#     ccall(f.unbox, PyPtr, (PyPtr, PyPtr, PyPtr), o1, o2, o3)
+# end
+# DIO_ExceptCode(::ternaryfunc) = Py_NULL
+
+const binaryfunc = Ptr{Nothing}
+const unaryfunc = Ptr{Nothing}
+const ternaryfunc = Ptr{Nothing}
 
 struct PyNumberMethods
     nb_add::binaryfunc
@@ -189,4 +194,3 @@ mutable struct PyTypeObject
     tp_prev::Ptr{Cvoid}
     tp_next::Ptr{Cvoid}
 end
-

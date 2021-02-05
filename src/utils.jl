@@ -22,6 +22,14 @@ macro q(ex)
     esc(Expr(:quote, q(ex, __module__)))
 end
 
+macro codegen(ex)
+    ex = __module__.eval(ex)
+    if DEBUG
+        @info macroexpand(__module__, ex)
+    end
+    __module__.eval(ex)
+end
+
 @inline function index(xs, x)
     @inbounds for i = eachindex(xs)
         if xs[i] === x
@@ -33,7 +41,7 @@ end
 
 @generated function fieldptr(::Type{A}, a::Ptr{T}, ::Val{s}) where {A, T, s}
     off = fieldoffset(T, index(fieldnames(T), s))
-    :(reinterpret(Ptr{$A}, reinterpret($Addr, a) +  $off))
+    :(reinterpret(Ptr{$A}, a + $off))
 end
 
 function _pacc(@nospecialize(ex::Expr))
