@@ -73,6 +73,8 @@ Parameters.@with_kw struct PyOType
     str :: PyPtr
     type :: PyPtr
     None :: PyPtr
+    True :: PyPtr
+    False :: PyPtr
     complex :: PyPtr
     tuple :: PyPtr
     list :: PyPtr

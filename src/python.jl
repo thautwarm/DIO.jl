@@ -1,6 +1,7 @@
 export PyPtr, PyObject, Py_NULL, METH_O, METH_NOARGS, METH_FASTCALL
 export Py_ssize_t, Addr
 export PyMethodDef
+export Py_LE, Py_LT, Py_NE, Py_EQ, Py_GE, Py_GT
 
 const Py_ssize_t = Cssize_t
 const Py_hash_t = Py_ssize_t
@@ -194,3 +195,10 @@ mutable struct PyTypeObject
     tp_prev::Ptr{Cvoid}
     tp_next::Ptr{Cvoid}
 end
+
+const Py_LT = Cint(0)
+const Py_LE = Cint(1)
+const Py_EQ = Cint(2)
+const Py_NE = Cint(3)
+const Py_GT = Cint(4)
+const Py_GE = Cint(5)

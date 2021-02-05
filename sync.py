@@ -8,7 +8,7 @@ class MyH(FileSystemEventHandler):
     def on_any_event(self, event):
         print("reload")
         subprocess.call(
-            ["julia", "-e",  r"""using Pkg; Pkg.rm("DIO"); Pkg.develop(path="."); using DIO; @info :ok"""])
+            ["julia", "-e",  r"""using Pkg; Pkg.develop(path="."); Pkg.rm("DIO"); Pkg.develop(path="."); using DIO; @info :ok"""])
 
 if __name__ == "__main__":
     path = sys.argv[1] if len(sys.argv) > 1 else '.'

@@ -6,7 +6,24 @@ const PY_VECTORCALL_ARGUMENTS_OFFSET = Csize_t(1) << Csize_t(8 * sizeof(Csize_t)
     PyObject_VectorcallDict = PySymMaybe(:PyObject_VectorcallDict)
     PyObject_CallFunctionObjArgs = PySym(:PyObject_CallFunctionObjArgs)
     PyExc_TypeError = PySym(PyPtr, :PyExc_TypeError)
+    PyObject_CallMethodObjArgs = PySym(:PyObject_CallMethodObjArgs)
 end
+
+
+@exportapi Py_CallMethod
+@generated function Py_CallMethod(apis::S, self::PyPtr, name::PyPtr, args::Vararg{PyPtr, N}) where {S, N}
+    argtypes = Expr(:tuple, [:PyPtr for i=1:N+3]...)
+    # N + 3 = object . name (arg1 ... argN) NULL
+    argvals = [:(args[$i]) for i=1:N]
+    @q begin
+        ccall(
+            apis.PyObject_CallMethodObjArgs,
+            PyPtr,
+            $argtypes,
+            self, name, $(argvals...), Py_NULL)
+    end
+end
+DIO_ExceptCode(::typeof(Py_CallMethod)) = Py_NULL
 
 @exportapi Py_CallFunction
 @generated function Py_CallFunction(apis::S, f::PyPtr, args::Vararg{PyPtr, N}) where {S, N}
@@ -25,6 +42,8 @@ DIO_ExceptCode(::typeof(Py_CallFunction)) = Py_NULL
 
 @apisetup begin
     Py_IntAsNumber = unsafe_load(reinterpret(Ptr{PyTypeObject}, PyO.int)).tp_as_number
+    PyInt_Compare = unsafe_load(reinterpret(Ptr{PyTypeObject}, PyO.int)).tp_richcompare
+
     Py_IntPow = unsafe_load(Py_IntAsNumber).nb_power
     Py_IntAddInt = unsafe_load(Py_IntAsNumber).nb_add
     PyLong_AsDouble = PySym(:PyLong_AsDouble)
@@ -40,8 +59,35 @@ DIO_ExceptCode(::typeof(Py_CallFunction)) = Py_NULL
     PyObject_GetItem = PySym(:PyObject_GetItem)
     PyErr_Print = PySym(:PyErr_Print)
     PyErr_Occurred = PySym(:PyErr_Occurred)
+    _PyList_GetItem = PySym(:PyList_GetItem)
+    PyLong_AsSsize_t = PySym(:PyLong_AsSsize_t)
+    PyObject_SetItem = PySym(:PyObject_SetItem)
+    PyObject_RichCompare = PySym(:PyObject_RichCompare)
 end
 
+@exportapi PyObject_RichCompare
+@autoapi PyObject_RichCompare(PyPtr, PyPtr, Cint)::PyPtr != Py_NULL
+@exportapi PyInt_Compare
+@autoapi PyInt_Compare(PyPtr, PyPtr, Cint)::PyPtr != Py_NULL
+
+@autoapi PyLong_AsSsize_t(PyPtr)::Py_ssize_t
+@autoapi _PyList_GetItem(PyPtr, Py_ssize_t)::PyPtr
+@exportapi PyList_GetItem
+function PyList_GetItem(apis, o_subject::PyPtr, o_item::PyPtr)
+    i = PyLong_AsSsize_t(apis, o_item)
+    if i == -1 && PyErr_Occurred(apis) != Py_NULL
+        return Py_NULL
+    end
+    o_val = _PyList_GetItem(apis, o_subject, i)
+    if o_val != Py_NULL
+        Py_INCREF(o_val)
+    end
+    return o_val
+end
+DIO_ExceptCode(::typeof(PyList_GetItem)) = Py_NULL
+
+@exportapi PyObject_SetItem
+@autoapi PyObject_SetItem(PyPtr, PyPtr, PyPtr)::Cint != Cint(-1)
 @exportapi PyFunction_GetGlobals
 @autoapi PyFunction_GetGlobals(PyPtr)::PyPtr != Py_NULL
 @exportapi Py_IntAddInt
