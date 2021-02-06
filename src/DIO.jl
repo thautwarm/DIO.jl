@@ -67,6 +67,8 @@ end
 
 Parameters.@with_kw struct PyOType
     PY_VERSION :: Tuple{Int, Int, Int, String, Int}
+    builtins :: PyPtr
+    print :: PyPtr
     bool::PyPtr
     int :: PyPtr
     float :: PyPtr
@@ -84,8 +86,9 @@ Parameters.@with_kw struct PyOType
 end
 
 const IsInitialized = Ref(false)
+const LibdlFlags = Libdl.RTLD_GLOBAL
 _initialize() = IsInitialized[] = true
-macro setup(path::String)
+macro setup(libpy_addr :: Addr)
     if IsInitialized[]
         Base.@warn "Re-setup is not allowed. Restart your runtime and import this package again."
     else
@@ -96,16 +99,11 @@ macro setup(path::String)
         
         unhygienic_part1 = @q begin
             $__source__
-            const PyDLL = $Libdl.dlopen($path)
-            PySym(t, sym::Symbol) = reinterpret(t, $Libdl.dlsym(PyDLL, sym))
+            const PyDLL = reinterpret(Ptr{Nothing}, $libpy_addr)
             PySym(sym::Symbol) = $Libdl.dlsym(PyDLL, sym)
             function PySymMaybe(sym::Symbol)
                 p = $Libdl.dlsym_e(PyDLL, sym)
                 p == C_NULL ? nothing : p
-            end
-            function PySymMaybe(t, sym::Symbol)
-                p = $Libdl.dlsym_e(PyDLL, sym)
-                p == C_NULL ? nothing : reinterpret(t, p)
             end
         end
 
@@ -134,7 +132,7 @@ macro setup(path::String)
             $_initialize()
         end
         
-        @q begin
+        r = @q begin
             # 'PyO' is computed when starting Julia from Python
             PyO = $(esc(:PyO))
             $(esc(unhygienic_part1))
@@ -143,6 +141,8 @@ macro setup(path::String)
             $hygienic_part
             $(esc(unhygienic_part2))
         end
+        DEBUG && @info r
+        return r
     end
 end
 
@@ -208,6 +208,7 @@ macro autoapi(rename::Symbol, ex::Expr)
     esc(_autoapi(rename, ex, __source__))
 end
 
+include("symbols.jl")
 include("support.jl")
 include("dynamic.jl")
 

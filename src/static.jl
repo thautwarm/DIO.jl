@@ -1,4 +1,4 @@
-export Py_TYPE, Py_INCREF
+export Py_TYPE, Py_INCREF, Py_TYPENAME
 function Py_INCREF(o::Ptr{PyObject})
     p = @pacc o.ob_refcnt :: Py_ssize_t
     i = unsafe_load(p)
@@ -56,6 +56,11 @@ function Py_NAME_OF_TYPE(p::Ptr{PyTypeObject})
     p = @pacc p.tp_name :: Ptr{UInt8}
     unsafe_string(unsafe_load(p))
 end
+
+function Py_NAME_OF_TYPE(p::PyPtr)
+    Py_NAME_OF_TYPE(reinterpret(Ptr{PyTypeObject}, p))
+end
+
 
 
 function Py_REFCNT(o::PyPtr)

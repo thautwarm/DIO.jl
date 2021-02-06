@@ -2,14 +2,6 @@ import Base: sigatomic_begin, sigatomic_end
 
 const PY_VECTORCALL_ARGUMENTS_OFFSET = Csize_t(1) << Csize_t(8 * sizeof(Csize_t) - 1)
 
-@apisetup begin
-    PyObject_VectorcallDict = PySymMaybe(:PyObject_VectorcallDict)
-    PyObject_CallFunctionObjArgs = PySym(:PyObject_CallFunctionObjArgs)
-    PyExc_TypeError = PySym(PyPtr, :PyExc_TypeError)
-    PyObject_CallMethodObjArgs = PySym(:PyObject_CallMethodObjArgs)
-end
-
-
 @exportapi Py_CallMethod
 @generated function Py_CallMethod(apis::S, self::PyPtr, name::PyPtr, args::Vararg{PyPtr, N}) where {S, N}
     argtypes = Expr(:tuple, [:PyPtr for i=1:N+3]...)
@@ -39,37 +31,6 @@ DIO_ExceptCode(::typeof(Py_CallMethod)) = Py_NULL
     end
 end
 DIO_ExceptCode(::typeof(Py_CallFunction)) = Py_NULL
-
-@apisetup begin
-    Py_IntAsNumber = unsafe_load(reinterpret(Ptr{PyTypeObject}, PyO.int)).tp_as_number
-    PyInt_Compare = unsafe_load(reinterpret(Ptr{PyTypeObject}, PyO.int)).tp_richcompare
-
-    Py_IntPow = unsafe_load(Py_IntAsNumber).nb_power
-    Py_IntAddInt = unsafe_load(Py_IntAsNumber).nb_add
-    PyLong_AsDouble = PySym(:PyLong_AsDouble)
-    PyFloat_FromDouble = PySym(:PyFloat_FromDouble)
-    PyList_Append = PySym(:PyList_Append)
-    _PyDict_GetItem_KnownHash = PySym(:_PyDict_GetItem_KnownHash)    
-    PyDict_GetItemWithError = PySym(:PyDict_GetItemWithError)
-    PyFunction_GetGlobals = PySym(:PyFunction_GetGlobals)
-    PyErr_ExceptionMatches = PySym(:PyErr_ExceptionMatches)
-    PyExc_KeyError = PySym(PyPtr, :PyExc_KeyError)
-    PyModule_GetDict = PySym(:PyModule_GetDict)
-    PyErr_Clear = PySym(:PyErr_Clear)
-    PyObject_GetItem = PySym(:PyObject_GetItem)
-    PyErr_Print = PySym(:PyErr_Print)
-    PyErr_Occurred = PySym(:PyErr_Occurred)
-    _PyList_GetItem = PySym(:PyList_GetItem)
-    _PyList_SetItem = PySym(:PyList_SetItem)
-    PyLong_AsSsize_t = PySym(:PyLong_AsSsize_t)
-    PyObject_SetItem = PySym(:PyObject_SetItem)
-    PyObject_RichCompare = PySym(:PyObject_RichCompare)
-    _PyList_New = PySym(:PyList_New)
-    _PySequence_Length = PySym(:PySequence_Length)
-    PyLong_FromSsize_t = PySym(:PyLong_FromSsize_t)
-    _PySequence_GetItem = PySym(:PySequence_GetItem)
-    _PyBytes_Join = PySym(:_PyBytes_Join)
-end
 
 @exportapi _PyBytes_Join
 @autoapi _PyBytes_Join(PyPtr, PyPtr)::PyPtr != Py_NULL

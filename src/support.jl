@@ -110,12 +110,6 @@ end
 
 DIO_ExceptCode(f::Function) = error("unknown except handling code for $(f).")
 
-@apisetup begin
-    PyErr_SetString = PySym(:PyErr_SetString)
-    PyExc_ValueError = PySym(PyPtr, :PyExc_ValueError)
-    PyCFunction_NewEx = PySym(:PyCFunction_NewEx)
-    PyObject_Str = PySym(:PyObject_Str)
-end
 @exportapi DIO_MakePyFastCFunc
 function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_ptr), @nospecialize(n), narg::Int)
     error_string = "expect $(narg) arguments, while got "
@@ -127,18 +121,20 @@ function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_pt
         push!(call_jl_func.args, :(unsafe_load($args_ptr, $i)))
     end
 
+    PyExc_TypeError = apis.PyExc_TypeError
     PyErr_SetString = apis.PyErr_SetString
-    PyExc_ValueError = apis.PyExc_ValueError
+    none = apis.PyO.None
     # g = gensym("ret")
     quote
         if $n != $narg
             msg = $error_string
+            cmsg = Base.unsafe_convert(Cstring, msg)
             GC.@preserve msg begin
                 ccall(
                     $PyErr_SetString,
                     Cvoid,
                     (PyPtr, Cstring),
-                    $PyExc_ValueError, Base.unsafe_convert(Cstring, msg))
+                    $PyExc_TypeError, cmsg)
             end
             DIO_ExceptCode($jl_func)
         else
