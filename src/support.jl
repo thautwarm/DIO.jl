@@ -1,22 +1,17 @@
-export @DIO_Obj, DIO_IncRef, DIO_DecRef, DIO_Undef, DIO_ExceptCode
-export @DIO_ChkExc, @DIO_ChkExcAndDecRefSubCall
-export @DIO_MakePyFastCFunc
-export @DIO_Return, @DIO_SetLineno
+#=
+# convention:
+# a variable representing PyPtr can be
+#             nothing => Py_None
+#             DIO_Err => Py_NULL = PyPtr(0)
+#             RC(a)   => PyPtr(a)
+# unintialized variables are DIO_Err
+=#
+export DIO_ExceptCode, DIO_Undef, DIO_PyOrNone
+export @DIO_Obj, @DIO_SetLineno
+export @DIO_MakePtrCFunc
 
 struct DIO_UndefType end
 const DIO_Undef = DIO_UndefType()
-
-@inline function DIO_DecRef(::DIO_UndefType) end
-@inline function DIO_DecRef(o::PyPtr)
-    Py_DECREF(o)
-    o
-end
-
-@inline function DIO_IncRef(::DIO_UndefType) end
-@inline function DIO_IncRef(o::PyPtr)
-    Py_INCREF(o)
-    o    
-end
 
 const PyConstants = Set{Addr}()
 function DIO_Obj(addr::Addr)::PyPtr
@@ -32,128 +27,6 @@ macro DIO_Obj(addr::Addr)
     DIO_Obj(addr)
 end
 
-macro DIO_ChkExc(ex::Expr)
-    f_sym =  @switch ex begin
-    @case Expr(:call, args...)
-        f_sym = if args[1] isa Symbol
-            args[1]
-        else
-            gensym("f")
-        end
-        args[1] = :($f_sym = $(args[1]))
-        f_sym
-    @case _
-        error("malformed use of @DIO_ChkExc")
-    end
-
-    call = gensym("call")
-    ret = Expr(
-        :block,
-        :($call = $ex),
-        Expr(
-            :if,
-            :($call === DIO_ExceptCode($f_sym)),
-            :(@goto except),
-            Expr(:call, :DIO_IdentityOrNone, call)))
-
-    return esc(ret)
-end
-
-macro DIO_ChkExcAndDecRefSubCall(ex::Expr)
-    tmps_to_decref = Symbol[]
-    f_sym = nothing
-
-    @switch ex begin
-    @case Expr(:call, args...)
-        f_sym = args[1] isa Symbol ? args[1] : gensym("f")
-        for i in eachindex(ex.args)
-            arg = ex.args[i]
-            @switch arg begin
-            @case Expr(:call, _...) || Expr(:macrocall, _, _, Expr(:call, _...))
-                if i === 1
-                    tmp = f_sym
-                else
-                    tmp = gensym("a$(i)")
-                end
-                push!(tmps_to_decref, tmp)
-                ex.args[i] = :($tmp = $arg)
-                nothing
-            @case _
-                nothing
-            end
-        end
-    @case _
-        error("malformed use of @DIO_ChkExcAndDecRefSubCall")
-    end
-
-    call = gensym("call")
-    ret = Expr(:block,
-        :($call = $ex)
-    )
-
-    # decref unused tmp
-    for each in tmps_to_decref
-        push!(ret.args, :(DIO_DecRef($each)))
-    end
-
-    # exception handle
-    push!(
-        ret.args,
-        Expr(
-            :if,
-            :($call === DIO_ExceptCode($f_sym)),
-            :(@goto except),
-            Expr(:call, :DIO_IdentityOrNone, call)))
-
-    return esc(ret)
-end
-
-DIO_ExceptCode(f::Function) = error("unknown except handling code for $(f).")
-
-@exportapi DIO_MakePyFastCFunc
-function DIO_MakePyFastCFunc(apis, @nospecialize(jl_func), @nospecialize(args_ptr), @nospecialize(n), narg::Int)
-    error_string = "expect $(narg) arguments, while got "
-    error_string = :("$($error_string)$(n).")
-
-    call_jl_func = Expr(:call, jl_func)
-
-    for i = 1:narg
-        push!(call_jl_func.args, :(unsafe_load($args_ptr, $i)))
-    end
-
-    PyExc_TypeError = apis.PyExc_TypeError
-    PyErr_SetString = apis.PyErr_SetString
-    none = apis.PyO.None
-    # g = gensym("ret")
-    quote
-        if $n != $narg
-            msg = $error_string
-            cmsg = Base.unsafe_convert(Cstring, msg)
-            GC.@preserve msg begin
-                ccall(
-                    $PyErr_SetString,
-                    Cvoid,
-                    (PyPtr, Cstring),
-                    $PyExc_TypeError, cmsg)
-            end
-            DIO_ExceptCode($jl_func)
-        else
-            $call_jl_func        
-        end
-    end
-end
-macro DIO_MakePyFastCFunc(jl_func, args_ptr, n, narg::Int)
-    # the first argument(`apis`) of the exported api function is omitted.    
-    esc(__module__.DIO_MakePyFastCFunc(jl_func, args_ptr, n, narg))
-end
-
-macro DIO_Return(ex)
-    esc(@q begin
-        DIO_Return = $ex
-        @goto ret
-    end)
-end
-
 @exportapi PyCFunction_NewEx
 @autoapi PyCFunction_NewEx(Ptr{Nothing}, PyPtr, PyPtr)::PyPtr
 
@@ -162,17 +35,128 @@ function PyCFunction_New(apis, cfuncptr::Ptr{Nothing}, UNUSED::PyPtr)
     @ccall $(apis.PyCFunction_NewEx)(cfuncptr::Ptr{Nothing}, UNUSED::PyPtr, Py_NULL::PyPtr)::PyPtr
 end
 
-@exportapi DIO_IdentityOrNone
-DIO_IdentityOrNone(apis, o::PyPtr) = begin
-    # Py_INCREF(o)
-    o
+macro DIO_SetLineno(line::Int, filename::String)
+    LineNumberNode(line, Symbol(filename))
 end
-DIO_IdentityOrNone(apis, _) = begin
+
+DIO_ExceptCode(f::Function) = error("no error handling for $(f).")
+
+macro DIO_MakePtrCFunc(narg::Int, jl_func::Symbol, funcname::Symbol)
+    if narg == 0
+        DIO_MakePtrCFunc0(jl_func, funcname, __module__)
+    elseif narg == 1
+        DIO_MakePtrCFunc1(jl_func, funcname, __module__)
+    else
+        DIO_MakePtrCFuncN(narg, jl_func, funcname, __module__)
+    end
+end
+
+function DIO_MakePtrCFunc0(jl_func::Symbol, funcname::Symbol, __module__::Any)
+    CFunc = Symbol(:CFunc_, jl_func)
+    CFuncPtr = Symbol(:CFuncPtr_, jl_func)
+    PyMeth = Symbol(:PyMeth_, jl_func)
+    Doc = Symbol(:DOC_, jl_func)
+    PyFunc = Symbol(:PyFunc_, jl_func)
+    ex = @q begin
+        @inline DIO.DIO_ExceptCode(::typeof($jl_func)) = Py_NULL
+        function $CFunc(_ :: PyPtr, _::PyPtr)::PyPtr
+            return $jl_func()
+        end
+        const $CFuncPtr = @cfunction($CFunc, PyPtr, (PyPtr, PyPtr))
+        const $PyMeth = PyMethodDef(
+            Base.unsafe_convert(Cstring, $(QuoteNode(funcname))),
+            $CFuncPtr,
+            METH_NOARGS,
+            Base.unsafe_convert(Cstring, $Doc)
+        )
+        const $PyFunc = PyCFunction_NewEx(pointer_from_objref($PyMeth), Py_NULL, Py_NULL)
+    end
+    if DEBUG
+        @info ex
+    end
+    foreach(__module__.eval, ex.args)
+end
+
+function DIO_MakePtrCFunc1(jl_func::Symbol, funcname::Symbol, __module__::Any)
+    CFunc = Symbol(:CFunc_, jl_func)
+    CFuncPtr = Symbol(:CFuncPtr_, jl_func)
+    PyMeth = Symbol(:PyMeth_, jl_func)
+    Doc = Symbol(:DOC_, jl_func)
+    PyFunc = Symbol(:PyFunc_, jl_func)
+    ex = @q begin
+        @inline DIO.DIO_ExceptCode(::typeof($jl_func)) = Py_NULL
+        function $CFunc(_ :: PyPtr, arg::PyPtr)::PyPtr
+            return $jl_func(arg)
+        end
+        const $CFuncPtr = @cfunction($CFunc, PyPtr, (PyPtr, PyPtr))
+        const $PyMeth = PyMethodDef(
+            Base.unsafe_convert(Cstring, $(QuoteNode(funcname))),
+            $CFuncPtr,
+            METH_O,
+            Base.unsafe_convert(Cstring, $Doc)
+        )
+        const $PyFunc = PyCFunction_NewEx(pointer_from_objref($PyMeth), Py_NULL, Py_NULL)
+    end
+    if DEBUG
+        @info ex
+    end
+    foreach(__module__.eval, ex.args)
+end        
+
+function DIO_MakePtrCFuncN(narg::Int, jl_func::Symbol, funcname::Symbol, __module__::Any)
+    CFunc = Symbol(:CFunc_, jl_func)
+    CFuncPtr = Symbol(:CFuncPtr_, jl_func)
+    PyMeth = Symbol(:PyMeth_, jl_func)
+    Doc = Symbol(:DOC_, jl_func)
+    PyFunc = Symbol(:PyFunc_, jl_func)
+    
+    error_string = "expect $(narg) arguments, while got "
+    error_string = :("$($error_string)$(n).")
+
+    vectorargs = gensym("vectorargs")
+    call_jl_func = Expr(:call, jl_func)
+    for i = 1:narg
+        push!(call_jl_func.args, :(unsafe_load($vectorargs, $i)))
+    end
+
+    PyAPI_Struct = __module__.PyAPI_Struct
+    ex = @q begin
+        @inline DIO.DIO_ExceptCode(::typeof($jl_func)) = Py_NULL
+        function $CFunc(self :: PyPtr, $vectorargs::Ptr{PyPtr}, argc::Py_ssize_t)::PyPtr
+            if argc != $narg
+                msg = $error_string
+                cmsg = Base.unsafe_convert(Cstring, msg)
+                GC.@preserve msg begin
+                    ccall(
+                        $(PyAPI_Struct.PyErr_SetString),
+                        Cvoid,
+                        (PyPtr, Cstring),
+                        $(PyAPI_Struct.PyExc_TypeError), cmsg)
+                end
+                return Py_NULL
+            end
+            return $call_jl_func
+        end
+        const $CFuncPtr = @cfunction($CFunc, PyPtr, (PyPtr, Ptr{PyPtr}, Py_ssize_t))
+        const $PyMeth = PyMethodDef(
+            Base.unsafe_convert(Cstring, $(QuoteNode(funcname))),
+            $CFuncPtr,
+            METH_FASTCALL,
+            Base.unsafe_convert(Cstring, $Doc)
+        )
+        const $PyFunc = PyCFunction_NewEx(pointer_from_objref($PyMeth), Py_NULL, Py_NULL)
+    end
+    if DEBUG
+        @info ex
+    end
+    foreach(__module__.eval, ex.args)
+end
+
+
+@exportapi DIO_PyOrNone
+@inline DIO_PyOrNone(apis, o::PyPtr) = o
+@inline DIO_PyOrNone(apis, _) = begin
     none = apis.PyO.None
     Py_INCREF(none)
     none
-end
-
-macro DIO_SetLineno(line::Int, filename::String)
-    LineNumberNode(line, Symbol(filename))
 end

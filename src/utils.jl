@@ -39,29 +39,30 @@ end
     nothing
 end
 
-@generated function fieldptr(::Type{A}, a::Ptr{T}, ::Val{s}) where {A, T, s}
+@generated function GEP(a::Ptr{T}, ::Val{s}) where {T, s}
     off = fieldoffset(T, index(fieldnames(T), s))
-    :(reinterpret(Ptr{$A}, a + $off))
+    R = fieldtype(T, s)
+    :(reinterpret(Ptr{$R}, a + $off))
 end
 
-function _pacc(@nospecialize(ex::Expr))
+function _pointer_access(@nospecialize(ex::Expr))
     @match ex begin
         :($a.$(s::Symbol) :: $A) =>
-            :($fieldptr($A, $(_pacc(a)),  $(Val(s))  ))
+            :(reinterpret(Ptr{$A}, $GEP($(_pointer_access(a)),  $(Val(s)))))
         :($a.$(s::Symbol)) =>
-            :($fieldptr(Nothing, $(_pacc(a)),  $(Val(s)) ))
+            :($GEP($(_pointer_access(a)),  $(Val(s))))
         ex =>
             begin
                 for i in eachindex(ex.args) 
-                    ex.args[i] = _pacc(ex.args[i])
+                    ex.args[i] = _pointer_access(ex.args[i])
                 end
                 ex
             end
     end
 end
 
-_pacc(a) = a
+_pointer_access(a) = a
 
-macro pacc(ex)
-    esc(_pacc(ex))
+macro pointer_access(ex)
+    esc(_pointer_access(ex))
 end

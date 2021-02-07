@@ -13,8 +13,8 @@
     PyObject_RichCompare = PySym(:PyObject_RichCompare)
 
     # sequence
-    _PySequence_Length = PySym(:PySequence_Length)
-    _PySequence_GetItem = PySym(:PySequence_GetItem)
+    PySequence_Length = PySym(:PySequence_Length)
+    PySequence_GetItem = PySym(:PySequence_GetItem)
     
     
     # unicode
@@ -44,9 +44,9 @@
 
     # list
     PyList_Append = PySym(:PyList_Append)
-    _PyList_GetItem = PySym(:PyList_GetItem)
-    _PyList_SetItem = PySym(:PyList_SetItem)
-    _PyList_New = PySym(:PyList_New)
+    PyList_GetItem = PySym(:PyList_GetItem)
+    PyList_SetItem = PySym(:PyList_SetItem)
+    PyList_New = PySym(:PyList_New)
     
     # function
     PyFunction_GetGlobals = PySym(:PyFunction_GetGlobals)

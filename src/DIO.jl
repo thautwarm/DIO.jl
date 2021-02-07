@@ -17,7 +17,7 @@ const PyAPI_Fields = Any[]
 const PyAPI_Construct = Expr[]
 
 """
-Automatically bound the loaded Python APIs(`PyAPI_Struct`) to the first argument,
+Automatically bind the loaded Python APIs(`PyAPI_Struct`) to the first argument,
 and enter a function `MyFunc(...) = <callee module>.MyFunc(PyAPI_Struct, ...)` 
 to the caller module:
     ```
@@ -69,7 +69,7 @@ Parameters.@with_kw struct PyOType
     PY_VERSION :: Tuple{Int, Int, Int, String, Int}
     builtins :: PyPtr
     print :: PyPtr
-    bool::PyPtr
+    bool :: PyPtr
     int :: PyPtr
     float :: PyPtr
     str :: PyPtr
@@ -145,69 +145,7 @@ macro setup(libpy_addr :: Addr)
         return r
     end
 end
-
-macro pycall(f, args...)
-    tmp = gensym("pycall")
-    r = @q begin
-        $__source__
-        $tmp = $f($(args...))
-        if $tmp === DIO_ExceptCode($f)
-            return Py_NULL
-        else
-            $tmp
-        end
-    end
-    esc(r)
-end
-
-
-function _autoapi(var::Union{Symbol, Nothing}, ex::Expr, __source__)
-    sym, anns, returntype, argtypes, args, except =
-        @switch ex begin
-        @case :($sym($(argtypes...))::$returntype != $except) ||
-              :($sym($(argtypes...))::$returntype) && let except = undef end 
-
-            narg = length(argtypes)
-            args = [Symbol("_arg$(i)") for i = 1:narg]
-            anns = [:($(args[i]) :: $(argtypes[i])) for i = 1:narg]
-            sym, anns, returntype, Expr(:tuple, argtypes...), args, except
-        end
-    var === nothing && (var = sym;)
-    r = @q begin
-        $__source__
-        function $var(apis, $(anns...))
-            $__source__
-            r = ccall(apis.$sym, $returntype, $argtypes, $(args...))
-            return r
-        end
-    end
-    if except !== undef    
-        push!(r.args, :($DIO.DIO_ExceptCode(::typeof($var)) = $except))
-    end
-    return r
-end
-
-"""
-create an API from a C symbol
-    ```
-        @autoapi PyObject_Call(PyPtr, PyPtr)::PyPtr != Py_NULL
-    ```
-    expands to
-    ```
-    function PyObject_Call(apis, x, y)
-        ccall(apis.PyObject_Call, PyPtr, (PyPtr, PyPtr), x, y)
-    end
-    DIO.DIO_ExceptCode(::typeof(PyObject_Call)) = Py_NULL
-    ```
-"""
-macro autoapi(ex::Expr)
-    esc(_autoapi(nothing, ex, __source__))
-end
-
-macro autoapi(rename::Symbol, ex::Expr)
-    esc(_autoapi(rename, ex, __source__))
-end
-
+include("macros.jl")
 include("symbols.jl")
 include("support.jl")
 include("dynamic.jl")

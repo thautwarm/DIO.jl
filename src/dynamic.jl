@@ -34,10 +34,11 @@ DIO_ExceptCode(::typeof(Py_CallFunction)) = Py_NULL
 
 @exportapi _PyBytes_Join
 @autoapi _PyBytes_Join(PyPtr, PyPtr)::PyPtr != Py_NULL
+
 @exportapi PySequence_GetItem
-@autoapi _PySequence_GetItem(PyPtr, Py_ssize_t)::PyPtr
+@autoapi PySequence_GetItem(PyPtr, Py_ssize_t)::PyPtr mangle(_PySequence_GetItem) borrow2new
 function PySequence_GetItem(apis, seq::PyPtr, item::PyPtr)::PyPtr
-    i = PyLong_AsSsize_t(apis, item)
+    i = _PyLong_AsSsize_t(apis, item)
     if i == -1 && PyErr_Occurred(apis) != Py_NULL
         return Py_NULL
     end
@@ -46,7 +47,7 @@ end
 DIO_ExceptCode(::typeof(PySequence_GetItem)) = Py_NULL
 
 @exportapi PySequence_Length
-@autoapi _PySequence_Length(PyPtr)::Py_ssize_t
+@autoapi PySequence_Length(PyPtr)::Py_ssize_t mangle(_PySequence_Length)
 @autoapi PyLong_FromSsize_t(Py_ssize_t)::PyPtr
 function PySequence_Length(apis, o::PyPtr)::PyPtr
     size = _PySequence_Length(apis, o)
@@ -67,8 +68,8 @@ end
 DIO_ExceptCode(::typeof(Py_AddressCompare)) = nothing
 
 @exportapi PyList_Construct
-@autoapi _PyList_SetItem(PyPtr, Py_ssize_t, PyPtr)::Cint
-@autoapi _PyList_New(Py_ssize_t)::PyPtr != Py_NULL
+@autoapi PyList_SetItem(PyPtr, Py_ssize_t, PyPtr)::Cint mangle(_PyList_SetItem)
+@autoapi PyList_New(Py_ssize_t)::PyPtr mangle(_PyList_New)
 function PyList_Construct(apis, args::Vararg{PyPtr,N}) where N
     lst = _PyList_New(apis, N)
     if lst === Py_NULL
@@ -89,19 +90,15 @@ DIO_ExceptCode(::typeof(PyList_Construct)) = Py_NULL
 @exportapi PyInt_Compare
 @autoapi PyInt_Compare(PyPtr, PyPtr, Cint)::PyPtr != Py_NULL
 
-@autoapi PyLong_AsSsize_t(PyPtr)::Py_ssize_t
-@autoapi _PyList_GetItem(PyPtr, Py_ssize_t)::PyPtr
 @exportapi PyList_GetItem
+@autoapi PyLong_AsSsize_t(PyPtr)::Py_ssize_t mangle(_PyLong_AsSsize_t)
+@autoapi PyList_GetItem(PyPtr, Py_ssize_t)::PyPtr borrow2new mangle(_PyList_GetItem)
 function PyList_GetItem(apis, o_subject::PyPtr, o_item::PyPtr)
-    i = PyLong_AsSsize_t(apis, o_item)
+    i = _PyLong_AsSsize_t(apis, o_item)
     if i == -1 && PyErr_Occurred(apis) != Py_NULL
         return Py_NULL
     end
-    o_val = _PyList_GetItem(apis, o_subject, i)
-    if o_val != Py_NULL
-        Py_INCREF(o_val)
-    end
-    return o_val
+    _PyList_GetItem(apis, o_subject, i)
 end
 DIO_ExceptCode(::typeof(PyList_GetItem)) = Py_NULL
 
@@ -152,7 +149,7 @@ DIO_ExceptCode(::typeof(Py_CallBoolIfNecessary)) = Py_NULL
 
 @exportapi PyDict_LoadGlobal
 function PyDict_LoadGlobal(apis, func::PyPtr, builtins::PyPtr, key::PyPtr)
-    globals = @pycall(PyFunction_GetGlobals, apis, func)
+    globals = @callexc(PyFunction_GetGlobals, apis, func)
     Py_INCREF(globals)
     o = PyDict_GetItemWithError(apis, globals, key)
     Py_DECREF(globals)
@@ -163,7 +160,7 @@ function PyDict_LoadGlobal(apis, func::PyPtr, builtins::PyPtr, key::PyPtr)
     if PyErr_Occurred(apis) != Py_NULL
         return Py_NULL
     end
-    builtins_dict = @pycall(PyModule_GetDict, apis, builtins)
+    builtins_dict = @callexc(PyModule_GetDict, apis, builtins)
     Py_INCREF(builtins_dict)
     o = PyDict_GetItemWithError(apis, builtins_dict, key)
     Py_DECREF(builtins_dict)
@@ -178,7 +175,7 @@ DIO_ExceptCode(::typeof(PyDict_LoadGlobal)) = Py_NULL
 
 @exportapi PyDict_LoadGlobal_KnownHash
 function PyDict_LoadGlobal_KnownHash(apis, func::PyPtr, builtins::PyPtr, key::PyPtr, hash::Py_hash_t)    
-    globals = @pycall(PyFunction_GetGlobals, apis, func)
+    globals = @callexc(PyFunction_GetGlobals, apis, func)
     Py_INCREF(globals)
     o = _PyDict_GetItem_KnownHash(apis, globals, key, hash)
     Py_DECREF(globals)
@@ -189,7 +186,7 @@ function PyDict_LoadGlobal_KnownHash(apis, func::PyPtr, builtins::PyPtr, key::Py
     if PyErr_Occurred(apis) != Py_NULL
         return Py_NULL
     end
-    builtins_dict = @pycall(PyModule_GetDict, apis, builtins)
+    builtins_dict = @callexc(PyModule_GetDict, apis, builtins)
     Py_INCREF(builtins_dict)
     o = _PyDict_GetItem_KnownHash(apis, builtins_dict, key, hash)
     Py_DECREF(builtins_dict)

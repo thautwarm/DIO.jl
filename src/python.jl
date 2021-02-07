@@ -44,7 +44,6 @@ end
 #     ccall(f.unbox, PyPtr, (PyPtr, PyPtr), o1, o2)
 # end
 # DIO_ExceptCode(::binaryfunc) = Py_NULL
-
 # (o) -> p
 # struct unaryfunc
 #     unbox::Ptr{Nothing}
@@ -53,7 +52,6 @@ end
 #     ccall(f.unbox, PyPtr, (PyPtr,), o)
 # end
 # DIO_ExceptCode(::unaryfunc) = Py_NULL
-
 # # (o, o, o) -> p
 # struct ternaryfunc
 #     unbox::Ptr{Nothing}
