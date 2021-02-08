@@ -197,3 +197,29 @@ function PyDict_LoadGlobal_KnownHash(apis, func::PyPtr, builtins::PyPtr, key::Py
     return o
 end
 DIO_ExceptCode(::typeof(PyDict_LoadGlobal_KnownHash)) = Py_NULL
+
+@exportapi PyNumber_Long
+@autoapi PyNumber_Long(PyPtr)::PyPtr != Py_NULL
+
+@exportapi _int2bool
+function _int2bool(apis, i::Cint)
+    o = i == 1 ? apis.PyO.True : apis.PyO.False
+    Py_INCREF(o)
+    return o
+end
+
+@exportapi PyObject_IsInstance
+@autoapi PyObject_IsInstance(PyPtr, PyPtr)::Cint != Cint(-1) cast(_int2bool) nocastexc
+
+@exportapi _zero2none
+function _zero2none(apis, i::Cint)
+    o = apis.PyO.None
+    Py_INCREF(o)
+    return o
+end
+
+@exportapi PyObject_SetAttr
+@autoapi PyObject_SetAttr(PyPtr, PyPtr, PyPtr)::Cint != Cint(-1) cast(_zero2none) nocastexc
+
+@exportapi PyObject_GetAttr
+@autoapi PyObject_GetAttr(PyPtr, PyPtr)::PyPtr != Py_NULL

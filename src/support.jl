@@ -6,9 +6,10 @@
 #             RC(a)   => PyPtr(a)
 # unintialized variables are DIO_Err
 =#
-export DIO_ExceptCode, DIO_Undef, DIO_PyOrNone
+export DIO_ExceptCode, DIO_Undef
 export @DIO_Obj, @DIO_SetLineno
 export @DIO_MakePtrCFunc
+export DIO_HasCast, DIO_Cast, DIO_CastExc
 
 struct DIO_UndefType end
 const DIO_Undef = DIO_UndefType()
@@ -39,7 +40,12 @@ macro DIO_SetLineno(line::Int, filename::String)
     LineNumberNode(line, Symbol(filename))
 end
 
-DIO_ExceptCode(f::Function) = error("no error handling for $(f).")
+DIO_ExceptCode(f) = error("no error handling for $(f).")
+DIO_HasCast(f) = false
+# f -> bool
+function DIO_CastExc end
+# (f, val) -> PyPtr
+function DIO_Cast end
 
 macro DIO_MakePtrCFunc(narg::Int, jl_func::Symbol, funcname::Symbol)
     if narg == 0
@@ -153,9 +159,31 @@ function DIO_MakePtrCFuncN(narg::Int, jl_func::Symbol, funcname::Symbol, __modul
 end
 
 
-@exportapi DIO_PyOrNone
-@inline DIO_PyOrNone(apis, o::PyPtr) = o
-@inline DIO_PyOrNone(apis, _) = begin
+@exportapi DIO_WrapIntValue
+@inline DIO_WrapIntValue(apis, i::Union{Cint, Clong})::PyPtr = begin
+    i = Clong(i)
+    ccall(apis.PyLong_FromLong, PyPtr, (Clong, ), i)
+end
+
+@inline DIO_WrapIntValue(apis, i::Csize_t)::PyPtr = begin
+    ccall(apis.PyLong_FromSize_t, PyPtr, (Csize_t, ), i)
+end
+
+@inline DIO_WrapIntValue(apis, i)::PyPtr = begin
+    msg = "Cannot wrap $i :: $(typeof(i))!"
+    cmsg = Base.unsafe_convert(Cstring, msg)
+    GC.@preserve msg begin
+        ccall(
+            apis.PyErr_SetString,
+            Cvoid,
+            (PyPtr, Cstring),
+            apis.PyExc_TypeError, cmsg)
+    end
+    Py_NULL
+end
+
+@exportapi DIO_NewNone
+@inline DIO_NewNone(apis) = begin
     none = apis.PyO.None
     Py_INCREF(none)
     none

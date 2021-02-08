@@ -2,6 +2,8 @@ function _autoapi(ex::Expr, options::AbstractArray{Any}, @nospecialize(__source_
     except = undef
     var = nothing
     rc = nothing
+    cast = nothing
+    castexc = true
     for opt_ex in options
         @switch opt_ex begin
         @case :(except($v))
@@ -10,6 +12,10 @@ function _autoapi(ex::Expr, options::AbstractArray{Any}, @nospecialize(__source_
             var = v
         @case :borrow2new
             rc = :(Py_XINCREF(ret))
+        @case :(cast($f))
+            cast = f
+        @case :nocastexc
+            castexc = false
         @case _
             Base.@warn "@autoapi: unknown option $(opt_ex)."
         end
@@ -39,6 +45,11 @@ function _autoapi(ex::Expr, options::AbstractArray{Any}, @nospecialize(__source_
     val = gensym(:val)
     if except !== undef 
         push!(r.args, :($DIO.DIO_ExceptCode(::typeof($var)) = $except))
+    end
+    if nothing !== cast
+        push!(r.args, :($DIO.DIO_HasCast(::typeof($var)) = true))
+        push!(r.args, :($DIO.DIO_Cast(::typeof($var), $val::$returntype)::PyPtr = $cast($val)))
+        push!(r.args, :($DIO.DIO_CastExc(::typeof($var)) = $castexc))
     end
     return r
 end

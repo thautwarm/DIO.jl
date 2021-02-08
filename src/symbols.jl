@@ -1,6 +1,5 @@
 @apisetup begin
     PyObject_GetAttrString = PySym(:PyObject_GetAttrString)
-    PyObject_GetAttr = PySym(:PyObject_GetAttr)
     PyCFunction_NewEx = PySym(:PyCFunction_NewEx)
     
     # object
@@ -11,12 +10,18 @@
     PyObject_GetItem = PySym(:PyObject_GetItem)
     PyObject_SetItem = PySym(:PyObject_SetItem)
     PyObject_RichCompare = PySym(:PyObject_RichCompare)
+    PyObject_IsInstance = PySym(:PyObject_IsInstance)
+    PyObject_SetAttr = PySym(:PyObject_SetAttr)
+    PyObject_GetAttr = PySym(:PyObject_GetAttr)
 
     # sequence
     PySequence_Length = PySym(:PySequence_Length)
     PySequence_GetItem = PySym(:PySequence_GetItem)
     
-    
+    # number
+    PyNumber_AsSsize_t = PySym(:PyNumber_AsSsize_t)
+    PyNumber_Long = PySym(:PyNumber_Long)
+
     # unicode
     PyUnicode_FromString = PySym(:PyUnicode_FromString)
 
@@ -30,6 +35,8 @@
     PyLong_AsDouble = PySym(:PyLong_AsDouble)
     PyLong_AsSsize_t = PySym(:PyLong_AsSsize_t)
     PyLong_FromSsize_t = PySym(:PyLong_FromSsize_t)
+    PyLong_FromLong = PySym(:PyLong_FromLong)
+    PyLong_FromSize_t = PySym(:PyLong_FromSize_t)
 
     # float
     PyFloat_FromDouble = PySym(:PyFloat_FromDouble)
