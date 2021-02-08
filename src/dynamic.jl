@@ -32,6 +32,14 @@ DIO_ExceptCode(::typeof(Py_CallMethod)) = Py_NULL
 end
 DIO_ExceptCode(::typeof(Py_CallFunction)) = Py_NULL
 
+@exportapi _cint2none
+function _cint2none(apis, i::Cint)
+    o = apis.PyO.None
+    Py_INCREF(o)
+    return o
+end
+
+
 @exportapi _PyBytes_Join
 @autoapi _PyBytes_Join(PyPtr, PyPtr)::PyPtr != Py_NULL
 
@@ -109,7 +117,7 @@ DIO_ExceptCode(::typeof(PyList_GetItem)) = Py_NULL
 @exportapi Py_IntAddInt
 @autoapi Py_IntAddInt(PyPtr, PyPtr)::PyPtr != Py_NULL
 @exportapi PyList_Append
-@autoapi PyList_Append(PyPtr, PyPtr)::Cint != Cint(-1)
+@autoapi PyList_Append(PyPtr, PyPtr)::Cint != Cint(-1) cast(_cint2none) nocastexc
 @exportapi _PyDict_GetItem_KnownHash
 @autoapi _PyDict_GetItem_KnownHash(PyPtr, PyPtr, Py_hash_t)::PyPtr != Py_NULL
 @exportapi PyDict_GetItemWithError
@@ -211,15 +219,9 @@ end
 @exportapi PyObject_IsInstance
 @autoapi PyObject_IsInstance(PyPtr, PyPtr)::Cint != Cint(-1) cast(_int2bool) nocastexc
 
-@exportapi _zero2none
-function _zero2none(apis, i::Cint)
-    o = apis.PyO.None
-    Py_INCREF(o)
-    return o
-end
 
 @exportapi PyObject_SetAttr
-@autoapi PyObject_SetAttr(PyPtr, PyPtr, PyPtr)::Cint != Cint(-1) cast(_zero2none) nocastexc
+@autoapi PyObject_SetAttr(PyPtr, PyPtr, PyPtr)::Cint != Cint(-1) cast(_cint2none) nocastexc
 
 @exportapi PyObject_GetAttr
 @autoapi PyObject_GetAttr(PyPtr, PyPtr)::PyPtr != Py_NULL
