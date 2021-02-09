@@ -7,6 +7,7 @@ const Py_ssize_t = Cssize_t
 const Py_hash_t = Py_ssize_t
 const Addr = UInt64
 
+# Ref: https://github.com/python/cpython/blob/3.8/Include/object.h#L104
 struct PyObject
     ob_refcnt::Py_ssize_t
     ob_type::Ptr{PyObject}
@@ -21,6 +22,7 @@ const METH_NOARGS = 0x0004
 const METH_O = 0x0008
 const METH_FASTCALL = 0x0080
 
+# Ref: https://github.com/python/cpython/blob/3.8/Include/methodobject.h#L51
 mutable struct PyMethodDef
     ml_name::Cstring
     ml_meth::Ptr{Nothing}
@@ -28,6 +30,7 @@ mutable struct PyMethodDef
     ml_doc::Cstring # may be NULL
 end
 
+# Ref: https://github.com/python/cpython/blob/3.8/Include/descrobject.h#L11
 struct PyGetSetDef
     name::Ptr{UInt8}
     get::Ptr{Cvoid}
@@ -65,6 +68,7 @@ const binaryfunc = Ptr{Nothing}
 const unaryfunc = Ptr{Nothing}
 const ternaryfunc = Ptr{Nothing}
 
+# Ref: https://github.com/python/cpython/blob/3.8/Include/cpython/object.h#L95
 struct PyNumberMethods
     nb_add::binaryfunc
     nb_subtract::binaryfunc
@@ -112,6 +116,7 @@ struct PyMemberDef
     doc::Ptr{UInt8}
 end
 
+# Ref: https://github.com/python/cpython/blob/3.8/Include/cpython/object.h#L177
 mutable struct PyTypeObject
     # PyObject_HEAD (for non-Py_TRACE_REFS build):
     ob_refcnt::Py_ssize_t
